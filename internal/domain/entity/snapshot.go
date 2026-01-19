@@ -1,0 +1,25 @@
+package entity
+
+import "time"
+
+type SnapshotType string
+type SnapshotTypes struct {
+	Working SnapshotType
+	Version SnapshotType
+}
+
+type Snapshot struct {
+	ID        string       `json:"id" gorm:"primaryKey;column:Id"`
+	PageID string       `json:"pageId" gorm:"index;column:PageId;index:idx_project_timestamp,priority:1;index:idx_project_type,priority:1"`
+	Elements  []Element    `json:"elements" gorm:"serializer:json;type:jsonb;column:Elements"`
+	Timestamp int64        `json:"timestamp" gorm:"column:Timestamp;index:idx_project_timestamp,priority:2"`
+	CreatedAt time.Time    `json:"createdAt" gorm:"column:CreatedAt;index"`
+	Name      string       `json:"name" gorm:"type:varchar(255);column:Name"`
+	Type      SnapshotType `json:"type" gorm:"type:varchar(50);column:Type;index:idx_project_type,priority:2"`
+
+	Page 		*Page `json:"page,omitempty" gorm:"foreignKey:PageID;references:ID;constraint:OnDelete:CASCADE"`
+}
+
+func (Snapshot) TableName() string {
+	return "Snapshot"
+}
