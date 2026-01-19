@@ -20,33 +20,64 @@ func NewElementRepository(db *gorm.DB) domainRepo.ElementRepository {
 	return &elementRepository{db: db}
 }
 
-// CreateElement persists a new element to the database
-func (r *elementRepository) CreateElement(ctx context.Context, projectID string, element *domainEntity.Element) error {
+// CreateElement persists a new element to the database, ensuring it belongs to the correct page
+func (r *elementRepository) CreateElement(ctx context.Context, projectID string, pageID string, element *domainEntity.Element) error {
+	element.PageID = pageID
+
 	if err := r.db.WithContext(ctx).Create(element).Error; err != nil {
 		return fmt.Errorf("failed to create element: %w", err)
 	}
 	return nil
 }
-
-// UpdateElement updates an existing element in the database
-func (r *elementRepository) UpdateElement(ctx context.Context, projectID string, element *domainEntity.Element) error {
-	if err := r.db.WithContext(ctx).Save(element).Error; err != nil {
-		return fmt.Errorf("failed to update element: %w", err)
+// Create Elements from a flattened elements array
+func (r *elementRepository) CreateElements(ctx context.Context, projectID string, pageId string, elements []domainEntity.Element) error {
+	for _, element := range elements {
+		element.PageID = pageId
+	}
+	if err := r.db.WithContext(ctx).CreateInBatches(elements, len(elements)).Error; err != nil {
+		return  err
 	}
 	return nil
 }
 
-// UpdateElements updates multiple elements within a transaction
-func (r *elementRepository) UpdateElements(ctx context.Context, projectID string, elements []domainEntity.Element) error {
+// UpdateElement updates an existing element in the database, scoped by pageID
+func (r *elementRepository) UpdateElement(ctx context.Context, projectID string, pageID string, element *domainEntity.Element) error {
+	result := r.db.WithContext(ctx).
+		Model(&domainEntity.Element{}).
+		Where(`"Id" = ? AND "PageId" = ?`, element.ID, pageID).
+		Save(element)
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to update element: %w", result.Error)
+	}
+
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("element not found in specified page")
+	}
+
+	return nil
+}
+
+// UpdateElements updates multiple elements within a transaction, scoped by pageID
+func (r *elementRepository) UpdateElements(ctx context.Context, projectID string, pageID string, elements []domainEntity.Element) error {
 	tx := r.db.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return fmt.Errorf("failed to start transaction: %w", tx.Error)
 	}
 
 	for i := range elements {
-		if err := tx.Save(&elements[i]).Error; err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("failed to update element: %w", err)
+		result := tx.Model(&domainEntity.Element{}).
+			Where(`"Id" = ? AND "PageId" = ?`, elements[i].ID, pageID).
+			Save(&elements[i])
+
+		if result.Error != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to update element %s: %w", elements[i].ID, result.Error)
+		}
+
+		if result.RowsAffected == 0 {
+			tx.Rollback()
+			return fmt.Errorf("element %s not found in specified page", elements[i].ID)
 		}
 	}
 
@@ -56,16 +87,25 @@ func (r *elementRepository) UpdateElements(ctx context.Context, projectID string
 	return nil
 }
 
-// DeleteElement removes an element by ID
-func (r *elementRepository) DeleteElement(ctx context.Context, projectID string, elementID string) error {
-	if err := r.db.WithContext(ctx).Delete(&domainEntity.Element{}, `"Id" = ?`, elementID).Error; err != nil {
-		return fmt.Errorf("failed to delete element: %w", err)
+// DeleteElement removes an element by ID, scoped by pageID
+func (r *elementRepository) DeleteElement(ctx context.Context, projectID string, pageID string, elementID string) error {
+	result := r.db.WithContext(ctx).
+		Where(`"Id" = ? AND "PageId" = ?`, elementID, pageID).
+		Delete(&domainEntity.Element{})
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to delete element: %w", result.Error)
 	}
+
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("element not found in specified page")
+	}
+
 	return nil
 }
 
-// GetElementByID retrieves a single element with its relations
-func (r *elementRepository) GetElementByID(ctx context.Context, projectID string, elementID string) (*domainEntity.Element, error) {
+// GetElementByID retrieves a single element with its relations, scoped by pageID
+func (r *elementRepository) GetElementByID(ctx context.Context, projectID string, pageID string, elementID string) (*domainEntity.Element, error) {
 	var elem domainEntity.Element
 	err := r.db.WithContext(ctx).
 		Preload("Setting").
@@ -73,7 +113,8 @@ func (r *elementRepository) GetElementByID(ctx context.Context, projectID string
 		Preload("Comments.Author").
 		Preload("EventWorkflows").
 		Preload("EventWorkflows.Workflow").
-		First(&elem, `"Id" = ?`, elementID).Error
+		Where(`"Id" = ? AND "PageId" = ?`, elementID, pageID).
+		First(&elem).Error
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

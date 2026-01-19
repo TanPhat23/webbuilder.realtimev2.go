@@ -1,0 +1,127 @@
+package usecase
+
+import (
+	"context"
+	"runtime"
+	"sync"
+	"time"
+
+	domainEntity "webbuilder/internal/domain/entity"
+	domainRepo "webbuilder/internal/domain/repository"
+	domainUseCase "webbuilder/internal/domain/usecase"
+	elementUtils "webbuilder/internal/utils/element"
+	"webbuilder/internal/utils/logger"
+)
+
+type PersistenceUseCase struct {
+	repo   *domainRepo.Repository
+	logger logger.Logger
+}
+
+func NewPersistenceUsecase(repo *domainRepo.Repository, logger logger.Logger) domainUseCase.PersistUseCase {
+	return &PersistenceUseCase{
+		repo:   repo,
+		logger: logger,
+	}
+}
+
+type Result struct {
+	projectID, pageID string
+	err               error
+}
+
+func (uc *PersistenceUseCase) worker(ctx context.Context, tasks <-chan domainEntity.DirtyPage, results chan<- Result, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for dirty := range tasks {
+		elementTree, err := uc.repo.DocumentRepo.GetDocument(ctx, dirty.ProjectID, dirty.PageID)
+		if err != nil {
+			results <- Result{
+				projectID: dirty.ProjectID,
+				pageID:    dirty.PageID,
+				err:       err,
+			}
+			continue
+		}
+		flattenedEl := elementUtils.FlattenElements(elementTree)
+		if err := uc.repo.ElementRepo.CreateElements(ctx, dirty.ProjectID, dirty.PageID, flattenedEl); err != nil {
+			results <- Result{
+				projectID: dirty.ProjectID,
+				pageID:    dirty.PageID,
+				err:       err,
+			}
+			continue
+		}
+		results <- Result{
+			projectID: dirty.ProjectID,
+			pageID:    dirty.PageID,
+			err:       nil,
+		}
+	}
+}
+
+func (uc *PersistenceUseCase) Start(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := uc.Flush(ctx); err != nil {
+				uc.logger.Errorf("Persistence background flush failed: %v", err)
+			}
+		}
+	}
+}
+
+func (uc *PersistenceUseCase) Flush(ctx context.Context) error {
+	dirtyPages, err := uc.repo.DocumentRepo.PopDirtyPages(ctx, 100)
+	if err != nil {
+		return err
+	}
+	if len(dirtyPages) == 0 {
+		return nil
+	}
+
+	workerCount := runtime.NumCPU()
+	if len(dirtyPages) < workerCount {
+		workerCount = len(dirtyPages)
+	}
+
+	tasks := make(chan domainEntity.DirtyPage, len(dirtyPages))
+	results := make(chan Result, len(dirtyPages))
+	wg := sync.WaitGroup{}
+
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go uc.worker(ctx, tasks, results, &wg)
+	}
+
+	for _, dirtyPage := range dirtyPages {
+		tasks <- dirtyPage
+	}
+	close(tasks)
+
+	// Wait for workers to finish processing all tasks
+	wg.Wait()
+	close(results)
+
+	// Collect results and log errors
+	var lastErr error
+	for result := range results {
+		if result.err != nil {
+			uc.logger.Errorf("Error saving elements to database for pageId %s projectID %s: %v", result.pageID, result.projectID, result.err)
+			lastErr = result.err
+		}
+	}
+	return lastErr
+}
+
+func (uc *PersistenceUseCase) MarkDirty(ctx context.Context, projectID, pageID string) error {
+	if err := uc.repo.DocumentRepo.MarkPageDirty(ctx, projectID, pageID); err != nil {
+		uc.logger.Errorf("failed to mark page dirty: %v", err)
+		return err
+	}
+	return nil
+}

@@ -7,27 +7,15 @@ import (
 	domainRepo "webbuilder/internal/domain/repository"
 )
 
-// Repository is a composition of all repositories that implements domainRepo.Repository.
-// By embedding the individual repository interfaces, it satisfies the composite Repository interface
-// defined in the domain layer.
-type Repository struct {
-	domainRepo.ElementRepository
-	domainRepo.SnapshotRepository
-	domainRepo.DocumentRepository
-	domainRepo.ProjectRepository
-	domainRepo.WorkflowRepository
-	domainRepo.ElementWorkflowRepository
-}
-
-// NewRepository creates a new instance of Repository that satisfies the domain Repository interface.
+// NewRepository creates a new instance of domain Repository struct that contains all sub-repositories.
 // It requires both a GORM DB connection for persistent storage and a Redis client for caching/real-time document state.
-func NewRepository(db *gorm.DB, rdb *redis.Client) domainRepo.Repository {
-	return &Repository{
-		ElementRepository:         NewElementRepository(db),
-		SnapshotRepository:        NewSnapshotRepository(db),
-		DocumentRepository:        NewDocumentRepository(rdb),
-		ProjectRepository:         NewProjectRepository(db),
-		WorkflowRepository:        NewWorkflowRepository(db),
-		ElementWorkflowRepository: NewElementWorkflowRepository(db),
+func NewRepository(db *gorm.DB, rdb *redis.Client) *domainRepo.Repository {
+	return &domainRepo.Repository{
+		ElementRepo:         NewElementRepository(db),
+		SnapshotRepo:        NewSnapshotRepository(db),
+		DocumentRepo:        NewDocumentRepository(rdb),
+		ProjectRepo:         NewProjectRepository(db),
+		WorkflowRepo:        NewWorkflowRepository(db),
+		ElementWorkflowRepo: NewElementWorkflowRepository(db),
 	}
 }

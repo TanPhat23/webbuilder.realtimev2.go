@@ -7,11 +7,12 @@ import (
 )
 
 type ElementRepository interface {
-	CreateElement(ctx context.Context, projectID string, element *entity.Element) error
-	UpdateElement(ctx context.Context, projectID string, element *entity.Element) error
-	UpdateElements(ctx context.Context, projectID string, elements []entity.Element) error
-	DeleteElement(ctx context.Context, projectID string, elementID string) error
-	GetElementByID(ctx context.Context, projectID string, elementID string) (*entity.Element, error)
+	CreateElement(ctx context.Context, projectID string, pageID string, element *entity.Element) error
+	CreateElements(ctx context.Context, projectID string, pageID string, element []entity.Element) error
+	UpdateElement(ctx context.Context, projectID string, pageID string, element *entity.Element) error
+	UpdateElements(ctx context.Context, projectID string, pageID string, elements []entity.Element) error
+	DeleteElement(ctx context.Context, projectID string, pageID string, elementID string) error
+	GetElementByID(ctx context.Context, projectID string, pageID string, elementID string) (*entity.Element, error)
 	GetElementsByPageID(ctx context.Context, projectID string, pageID string) ([]entity.Element, error)
 	GetElementsByProjectID(ctx context.Context, projectID string) ([]entity.Element, error)
 }
@@ -26,6 +27,9 @@ type DocumentRepository interface {
 	SetDocument(ctx context.Context, projectID string, pageID string, elements []entity.Element) error
 	GetDocument(ctx context.Context, projectID string, pageID string) ([]entity.Element, error)
 	DeleteDocument(ctx context.Context, projectID string, pageID string) error
+
+	MarkPageDirty(ctx context.Context, projectID string, pageId string) error
+	PopDirtyPages(ctx context.Context, limit int) ([]entity.DirtyPage, error)
 }
 
 type WorkflowRepository interface {
@@ -49,11 +53,11 @@ type ElementWorkflowRepository interface {
 	DeleteElementWorkflow(ctx context.Context, projectID string, elementID string) error
 }
 
-type Repository interface {
-	ElementRepository
-	SnapshotRepository
-	DocumentRepository
-	ProjectRepository
-	WorkflowRepository
-	ElementWorkflowRepository
+type Repository struct {
+	ElementRepo         ElementRepository
+	SnapshotRepo        SnapshotRepository
+	DocumentRepo        DocumentRepository
+	ProjectRepo         ProjectRepository
+	WorkflowRepo        WorkflowRepository
+	ElementWorkflowRepo ElementWorkflowRepository
 }

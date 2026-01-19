@@ -60,15 +60,14 @@ func main() {
 		lg.Fatalf("Failed to connect to redis: %v", err)
 	}
 
-	// Initialize the unified repository
+	// Initialize the unified repository container
 	repos := repository.NewRepository(db, rdb)
 
-	// Initialize Use Cases
-	docUseCase := usecase.NewDocumentUseCase(repos, repos)
-	elemUseCase := usecase.NewElementUseCase(repos, docUseCase)
+	// Initialize the central UseCase container
+	useCases := usecase.NewUseCase(repos, lg)
 
-	// Initialize WebSocket Handler
-	wsHandler := ws.NewHandler(elemUseCase, docUseCase, rdb, lg)
+	// Initialize WebSocket Handler with the central UseCase container
+	wsHandler := ws.NewHandler(useCases, rdb, lg)
 
 	app := fiber.New()
 

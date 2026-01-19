@@ -22,27 +22,25 @@ type MessageHandler func(ctx context.Context, client *wsentity.Client, msg domai
 
 // Handler manages WebSocket connections and delegates messages to specific command handlers.
 type Handler struct {
-	elementUseCase  domainUsecase.ElementUseCase
-	documentUseCase domainUsecase.DocumentUseCase
-	hub             *wsentity.Hub
-	handlers        map[domainEntity.MessageType]MessageHandler
-	wg              sync.WaitGroup
-	ctx             context.Context
-	cancel          context.CancelFunc
-	sendBuf         int
-	logger          logger.Logger
+	uc       *domainUsecase.UseCase
+	hub      *wsentity.Hub
+	handlers map[domainEntity.MessageType]MessageHandler
+	wg       sync.WaitGroup
+	ctx      context.Context
+	cancel   context.CancelFunc
+	sendBuf  int
+	logger   logger.Logger
 }
 
 // NewHandler initializes a new WebSocket handler with registered command handlers.
-func NewHandler(uc domainUsecase.ElementUseCase, duc domainUsecase.DocumentUseCase, rdb *redis.Client, lg logger.Logger) *Handler {
+func NewHandler(uc *domainUsecase.UseCase, rdb *redis.Client, lg logger.Logger) *Handler {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Handler{
-		elementUseCase:  uc,
-		documentUseCase: duc,
-		ctx:             ctx,
-		cancel:          cancel,
-		sendBuf:         64,
-		logger:          lg,
+		uc:      uc,
+		ctx:     ctx,
+		cancel:  cancel,
+		sendBuf: 64,
+		logger:  lg,
 	}
 	h.hub = wsentity.NewHub(h.ctx, &h.wg, h.sendBuf, rdb, lg)
 	h.registerHandlers()
@@ -142,7 +140,7 @@ func (h *Handler) handleJoin(ctx context.Context, client *wsentity.Client, msg d
 	}
 
 	// Send initial synchronization state
-	elements, err := h.documentUseCase.GetDocument(ctx, client.ProjectID, client.PageID)
+	elements, err := h.uc.Document.GetDocument(ctx, client.ProjectID, client.PageID)
 	if err == nil {
 		syncMsg, _ := client.Factory().Sync(elements, nil)
 		_ = client.Send(syncMsg)
@@ -173,7 +171,7 @@ func (h *Handler) handleElementCreate(ctx context.Context, client *wsentity.Clie
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
 
-	if err := h.elementUseCase.AddElement(ctx, client.ProjectID, &payload.Element); err != nil {
+	if err := h.uc.Element.AddElement(ctx, client.ProjectID, &payload.Element); err != nil {
 		return err
 	}
 
@@ -197,7 +195,7 @@ func (h *Handler) handleElementUpdate(ctx context.Context, client *wsentity.Clie
 	}
 
 	// Use the specific PatchElement logic moved to use case for better scalability/reusability
-	if err := h.elementUseCase.PatchElement(ctx, client.ProjectID, payload.ID, payload.Properties, payload.Styles, payload.Settings); err != nil {
+	if err := h.uc.Element.PatchElement(ctx, client.ProjectID, client.PageID, payload.ID, payload.Properties, payload.Styles, payload.Settings); err != nil {
 		return err
 	}
 
@@ -216,7 +214,7 @@ func (h *Handler) handleElementDelete(ctx context.Context, client *wsentity.Clie
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
 
-	if err := h.elementUseCase.RemoveElement(ctx, client.ProjectID, payload.ID); err != nil {
+	if err := h.uc.Element.RemoveElement(ctx, client.ProjectID, client.PageID, payload.ID); err != nil {
 		return err
 	}
 
@@ -240,7 +238,7 @@ func (h *Handler) handleElementMove(ctx context.Context, client *wsentity.Client
 		parentID = *payload.ParentID
 	}
 
-	if _, err := h.elementUseCase.MoveElement(ctx, client.ProjectID, payload.ID, parentID, payload.Order); err != nil {
+	if _, err := h.uc.Element.MoveElement(ctx, client.ProjectID, client.PageID, payload.ID, parentID, payload.Order); err != nil {
 		return err
 	}
 
@@ -265,7 +263,7 @@ func (h *Handler) handleSync(ctx context.Context, client *wsentity.Client, msg d
 		return domainErrors.ErrNotJoined
 	}
 
-	elements, err := h.elementUseCase.SyncPage(ctx, client.ProjectID, client.PageID)
+	elements, err := h.uc.Element.SyncPage(ctx, client.ProjectID, client.PageID)
 	if err != nil {
 		return err
 	}

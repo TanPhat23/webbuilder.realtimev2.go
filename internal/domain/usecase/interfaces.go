@@ -16,13 +16,13 @@ type ElementUseCase interface {
 	// AddElement creates a new element in the given project/page and refreshes the page cache.
 	AddElement(ctx context.Context, projectID string, element *entity.Element) error
 	// UpdateElement updates an existing element and refreshes the page cache.
-	UpdateElement(ctx context.Context, projectID string, element *entity.Element) error
+	UpdateElement(ctx context.Context, projectID string, pageID string, element *entity.Element) error
 	// PatchElement applies granular updates to an element and refreshes the page cache.
-	PatchElement(ctx context.Context, projectID string, elementID string, properties map[string]any, styles map[string]any, settings *entity.Setting) error
+	PatchElement(ctx context.Context, projectID string, pageID string, elementID string, properties map[string]any, styles map[string]any, settings *entity.Setting) error
 	// RemoveElement deletes an element and refreshes the page cache.
-	RemoveElement(ctx context.Context, projectID string, elementID string) error
+	RemoveElement(ctx context.Context, projectID string, pageID string, elementID string) error
 	// MoveElement moves the element under a new parent at the given index and refreshes the page cache.
-	MoveElement(ctx context.Context, projectID string, elementID string, parentID string, index int) (*entity.Element, error)
+	MoveElement(ctx context.Context, projectID string, pageID string, elementID string, parentID string, index int) (*entity.Element, error)
 	// GetElementsByPageID returns all elements that belong to the specified page.
 	GetElementsByPageID(ctx context.Context, projectID string, pageID string) ([]entity.Element, error)
 	// GetElementsByProjectID returns all elements across the specified project.
@@ -44,4 +44,20 @@ type DocumentUseCase interface {
 	RefreshCache(ctx context.Context, projectID string, pageID string) error
 	// AddElementsToDocument sets the cached snapshot for the given page.
 	AddElementsToDocument(ctx context.Context, projectID string, pageID string, elements []entity.Element) error
+}
+
+
+type PersistUseCase interface {
+	Start(ctx context.Context)
+
+	MarkDirty(ctx context.Context, projectID, pageID string) error
+
+	Flush(ctx context.Context) error
+}
+
+// UseCase provides a central container for all use case interfaces.
+type UseCase struct {
+	Element  ElementUseCase
+	Document DocumentUseCase
+	Persist  PersistUseCase
 }

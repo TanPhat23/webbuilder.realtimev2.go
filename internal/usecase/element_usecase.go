@@ -17,15 +17,15 @@ import (
 )
 
 type elementUseCase struct {
-	elementRepo domainRepo.ElementRepository
-	docUseCase  domainUsecase.DocumentUseCase
+	repo       *domainRepo.Repository
+	docUseCase domainUsecase.DocumentUseCase
 }
 
 // NewElementUseCase creates a new instance of elementUseCase
-func NewElementUseCase(elementRepo domainRepo.ElementRepository, docUseCase domainUsecase.DocumentUseCase) domainUsecase.ElementUseCase {
+func NewElementUseCase(repo *domainRepo.Repository, docUseCase domainUsecase.DocumentUseCase) domainUsecase.ElementUseCase {
 	return &elementUseCase{
-		elementRepo: elementRepo,
-		docUseCase:  docUseCase,
+		repo:       repo,
+		docUseCase: docUseCase,
 	}
 }
 
@@ -37,14 +37,12 @@ func (uc *elementUseCase) SyncPage(ctx context.Context, projectID string, pageID
 	return uc.docUseCase.GetDocument(ctx, projectID, pageID)
 }
 
-
-
 func (uc *elementUseCase) GetElementsByPageID(ctx context.Context, projectID string, pageID string) ([]domainEntity.Element, error) {
-	return uc.elementRepo.GetElementsByPageID(ctx, projectID, pageID)
+	return uc.repo.ElementRepo.GetElementsByPageID(ctx, projectID, pageID)
 }
 
 func (uc *elementUseCase) GetElementsByProjectID(ctx context.Context, projectID string) ([]domainEntity.Element, error) {
-	return uc.elementRepo.GetElementsByProjectID(ctx, projectID)
+	return uc.repo.ElementRepo.GetElementsByProjectID(ctx, projectID)
 }
 
 func (uc *elementUseCase) AddElement(ctx context.Context, projectID string, element *domainEntity.Element) error {
@@ -58,14 +56,14 @@ func (uc *elementUseCase) AddElement(ctx context.Context, projectID string, elem
 
 	uc.setTimestamps(element, true)
 
-	if err := uc.elementRepo.CreateElement(ctx, projectID, element); err != nil {
+	if err := uc.repo.ElementRepo.CreateElement(ctx, projectID, element.PageID, element); err != nil {
 		return fmt.Errorf("failed to create element in db: %w", err)
 	}
 
 	return uc.docUseCase.RefreshCache(ctx, projectID, element.PageID)
 }
 
-func (uc *elementUseCase) UpdateElement(ctx context.Context, projectID string, element *domainEntity.Element) error {
+func (uc *elementUseCase) UpdateElement(ctx context.Context, projectID string, pageID string, element *domainEntity.Element) error {
 	if element == nil || element.ID == "" {
 		return domainErrors.New(domainErrors.CodeValidation, "element id is required", nil)
 	}
@@ -74,7 +72,7 @@ func (uc *elementUseCase) UpdateElement(ctx context.Context, projectID string, e
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
 
-	existing, err := uc.getExistingElement(ctx, projectID, element.ID)
+	existing, err := uc.getExistingElement(ctx, projectID, element.PageID, element.ID)
 	if err != nil {
 		return err
 	}
@@ -85,15 +83,15 @@ func (uc *elementUseCase) UpdateElement(ctx context.Context, projectID string, e
 
 	uc.setTimestamps(element, false)
 
-	if err := uc.elementRepo.UpdateElement(ctx, projectID, element); err != nil {
+	if err := uc.repo.ElementRepo.UpdateElement(ctx, projectID, element.PageID, element); err != nil {
 		return fmt.Errorf("failed to update element in db: %w", err)
 	}
 
 	return uc.docUseCase.RefreshCache(ctx, projectID, element.PageID)
 }
 
-func (uc *elementUseCase) PatchElement(ctx context.Context, projectID string, elementID string, properties map[string]any, styles map[string]any, settings *domainEntity.Setting) error {
-	existing, err := uc.getExistingElement(ctx, projectID, elementID)
+func (uc *elementUseCase) PatchElement(ctx context.Context, projectID string, pageID string, elementID string, properties map[string]any, styles map[string]any, settings *domainEntity.Setting) error {
+	existing, err := uc.getExistingElement(ctx, projectID, pageID, elementID)
 	if err != nil {
 		return err
 	}
@@ -110,36 +108,36 @@ func (uc *elementUseCase) PatchElement(ctx context.Context, projectID string, el
 
 	uc.setTimestamps(existing, false)
 
-	if err := uc.elementRepo.UpdateElement(ctx, projectID, existing); err != nil {
+	if err := uc.repo.ElementRepo.UpdateElement(ctx, projectID, pageID, existing); err != nil {
 		return fmt.Errorf("failed to update element in db: %w", err)
 	}
 
 	return uc.docUseCase.RefreshCache(ctx, projectID, existing.PageID)
 }
 
-func (uc *elementUseCase) MoveElement(ctx context.Context, projectID string, elementID string, parentID string, index int) (*domainEntity.Element, error) {
-	element, err := uc.getExistingElement(ctx, projectID, elementID)
+func (uc *elementUseCase) MoveElement(ctx context.Context, projectID string, pageID string, elementID string, parentID string, index int) (*domainEntity.Element, error) {
+	element, err := uc.getExistingElement(ctx, projectID, pageID, elementID)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := uc.validateMoveTarget(ctx, projectID, element, parentID, index); err != nil {
+	if err := uc.validateMoveTarget(ctx, projectID, pageID, element, parentID, index); err != nil {
 		return nil, err
 	}
 
-	all, err := uc.elementRepo.GetElementsByPageID(ctx, projectID, element.PageID)
+	all, err := uc.repo.ElementRepo.GetElementsByPageID(ctx, projectID, element.PageID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch elements for page: %w", err)
 	}
 
 	toUpdate := uc.calculateMoveReordering(element, all, parentID, index)
 
-	if err := uc.elementRepo.UpdateElements(ctx, projectID, toUpdate); err != nil {
+	if err := uc.repo.ElementRepo.UpdateElements(ctx, projectID, pageID, toUpdate); err != nil {
 		return nil, fmt.Errorf("failed to update elements order in db: %w", err)
 	}
 
 	// Fetch fresh copy after move
-	updatedElem, err := uc.elementRepo.GetElementByID(ctx, projectID, element.ID)
+	updatedElem, err := uc.repo.ElementRepo.GetElementByID(ctx, projectID, pageID, element.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch updated element: %w", err)
 	}
@@ -151,8 +149,8 @@ func (uc *elementUseCase) MoveElement(ctx context.Context, projectID string, ele
 	return updatedElem, nil
 }
 
-func (uc *elementUseCase) RemoveElement(ctx context.Context, projectID string, elementID string) error {
-	element, err := uc.elementRepo.GetElementByID(ctx, projectID, elementID)
+func (uc *elementUseCase) RemoveElement(ctx context.Context, projectID string, pageID string, elementID string) error {
+	element, err := uc.repo.ElementRepo.GetElementByID(ctx, projectID, pageID, elementID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch element for deletion: %w", err)
 	}
@@ -160,7 +158,7 @@ func (uc *elementUseCase) RemoveElement(ctx context.Context, projectID string, e
 		return nil
 	}
 
-	if err := uc.elementRepo.DeleteElement(ctx, projectID, elementID); err != nil {
+	if err := uc.repo.ElementRepo.DeleteElement(ctx, projectID, pageID, elementID); err != nil {
 		return fmt.Errorf("failed to delete element from db: %w", err)
 	}
 
@@ -169,11 +167,11 @@ func (uc *elementUseCase) RemoveElement(ctx context.Context, projectID string, e
 
 // Internal Helpers
 
-func (uc *elementUseCase) getExistingElement(ctx context.Context, projectID, elementID string) (*domainEntity.Element, error) {
+func (uc *elementUseCase) getExistingElement(ctx context.Context, projectID, pageID, elementID string) (*domainEntity.Element, error) {
 	if elementID == "" {
 		return nil, domainErrors.New(domainErrors.CodeValidation, "element id is required", nil)
 	}
-	existing, err := uc.elementRepo.GetElementByID(ctx, projectID, elementID)
+	existing, err := uc.repo.ElementRepo.GetElementByID(ctx, projectID, pageID, elementID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch existing element: %w", err)
 	}
@@ -191,12 +189,12 @@ func (uc *elementUseCase) setTimestamps(element *domainEntity.Element, isNew boo
 	element.UpdatedAt = now
 }
 
-func (uc *elementUseCase) validateMoveTarget(ctx context.Context, projectID string, element *domainEntity.Element, parentID string, index int) error {
+func (uc *elementUseCase) validateMoveTarget(ctx context.Context, projectID string, pageID string, element *domainEntity.Element, parentID string, index int) error {
 	if index < 0 {
 		return domainErrors.New(domainErrors.CodeValidation, "index must be non-negative", nil)
 	}
 	if parentID != "" {
-		parent, err := uc.elementRepo.GetElementByID(ctx, projectID, parentID)
+		parent, err := uc.repo.ElementRepo.GetElementByID(ctx, projectID, pageID, parentID)
 		if err != nil || parent == nil {
 			return domainErrors.New(domainErrors.CodeNotFound, "parent element not found", nil)
 		}

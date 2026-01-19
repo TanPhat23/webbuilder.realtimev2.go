@@ -33,20 +33,27 @@ All communication (incoming and outgoing) uses a standard envelope:
 ## 3. Client to Server Messages
 
 ### Join Page
+
 Must be sent before performing any element operations.
+
 - **Type:** `join`
 - **Payload:**
+
 ```json
 {
   "pageId": "string"
 }
 ```
-*Note: Upon joining, the server will automatically respond with a `sync` message containing the current page state.*
+
+_Note: Upon joining, the server will automatically respond with a `sync` message containing the current page state._
 
 ### Presence (Cursor/Selection)
+
 Broadcasts your current activity to other users.
+
 - **Type:** `presence`
 - **Payload:**
+
 ```json
 {
   "userId": "string",
@@ -59,8 +66,10 @@ Broadcasts your current activity to other users.
 ```
 
 ### Create Element
+
 - **Type:** `element:create`
 - **Payload:**
+
 ```json
 {
   "element": {
@@ -73,9 +82,12 @@ Broadcasts your current activity to other users.
 ```
 
 ### Update Element (Partial)
+
 Updates only the provided fields.
+
 - **Type:** `element:update`
 - **Payload:**
+
 ```json
 {
   "id": "uuid-string",
@@ -86,9 +98,12 @@ Updates only the provided fields.
 ```
 
 ### Move Element
+
 Reparents or reorders an element.
+
 - **Type:** `element:move`
 - **Payload:**
+
 ```json
 {
   "id": "uuid-string",
@@ -98,8 +113,10 @@ Reparents or reorders an element.
 ```
 
 ### Delete Element
+
 - **Type:** `element:delete`
 - **Payload:**
+
 ```json
 {
   "id": "uuid-string"
@@ -107,7 +124,9 @@ Reparents or reorders an element.
 ```
 
 ### Sync Request
+
 Force a refresh of the current page state.
+
 - **Type:** `sync`
 - **Payload:** Empty
 
@@ -116,9 +135,12 @@ Force a refresh of the current page state.
 ## 4. Server to Client Messages
 
 ### Initial State Sync
+
 Sent automatically after a successful `join` or requested via `sync`.
+
 - **Type:** `sync`
 - **Payload:**
+
 ```json
 {
   "elements": [...],
@@ -127,12 +149,16 @@ Sent automatically after a successful `join` or requested via `sync`.
 ```
 
 ### Broadcasted Operations
+
 When another user performs an action (create, update, delete, move), the server broadcasts the exact same message type and payload to all other participants in the room.
 
 ### Error Report
+
 Sent when an operation fails validation or encounters a system error.
+
 - **Type:** `error`
 - **Payload:**
+
 ```json
 {
   "code": "VALIDATION_ERROR | NOT_FOUND | JOIN_REQUIRED",
@@ -144,9 +170,9 @@ Sent when an operation fails validation or encounters a system error.
 
 ## 5. Standard Error Codes
 
-| Code | Description |
-| :--- | :--- |
-| `VALIDATION_ERROR` | The payload data failed schema validation. |
-| `NOT_FOUND` | The requested element or project does not exist. |
-| `JOIN_REQUIRED` | You attempted an operation before sending a `join` message. |
-| `PROCESS_ERROR` | An internal error occurred while processing the request. |
+| Code               | Description                                                 |
+| :----------------- | :---------------------------------------------------------- |
+| `VALIDATION_ERROR` | The payload data failed schema validation.                  |
+| `NOT_FOUND`        | The requested element or project does not exist.            |
+| `JOIN_REQUIRED`    | You attempted an operation before sending a `join` message. |
+| `PROCESS_ERROR`    | An internal error occurred while processing the request.    |

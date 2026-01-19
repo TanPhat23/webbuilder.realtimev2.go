@@ -27,6 +27,11 @@ func (Page) TableName() string {
 	return "Page"
 }
 
+type DirtyPage struct {
+	ProjectID string `json:"projectId"`
+	PageID    string `json:"pageId"`
+}
+
 // User represents a user in the system.
 // This matches the Prisma User model.
 type User struct {

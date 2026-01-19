@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -11,6 +12,8 @@ import (
 	domainEntity "webbuilder/internal/domain/entity"
 	domainRepo "webbuilder/internal/domain/repository"
 )
+
+const dirtyPageKey = "dirty_pages"
 
 type documentRepository struct {
 	client *redis.Client
@@ -70,6 +73,32 @@ func (r *documentRepository) DeleteDocument(ctx context.Context, projectID strin
 	}
 
 	return nil
+}
+
+func (r *documentRepository) MarkPageDirty(ctx context.Context, projectID string, pageID string) error  {
+	val := fmt.Sprintf("%d:%d", projectID, pageID)
+	return r.client.SAdd(ctx, dirtyPageKey, val).Err()
+}
+
+func (r *documentRepository) PopDirtyPages(ctx context.Context, limit int) ([]domainEntity.DirtyPage, error) {
+	results, err := r.client.SPopN(ctx, dirtyPageKey, int64(limit)).Result()
+	if err != nil {
+		if err == redis.Nil{
+			return nil, nil
+		}
+		return nil, err
+	}
+	var dirtyPages []domainEntity.DirtyPage
+	for _, result := range results{
+		parts := strings.SplitN(result, ":", 2)
+		if len(parts) == 2{
+			dirtyPages = append(dirtyPages, domainEntity.DirtyPage{
+				ProjectID: parts[0],
+				PageID: parts[0],
+			})
+		}
+	}
+	return dirtyPages, nil
 }
 
 func (r *documentRepository) getKey(projectID string, pageID string) string {
