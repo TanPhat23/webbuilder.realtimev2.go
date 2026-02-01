@@ -18,7 +18,7 @@ type roomBroadcast struct {
 
 // Room manages clients for a single page/project.
 type Room struct {
-	PageID string
+	PageID     string
 	clients    map[*Client]bool
 	register   chan registerRequest
 	unregister chan unregisterRequest
@@ -37,7 +37,7 @@ type Room struct {
 func NewRoom(roomID string, parentCtx context.Context, wg *sync.WaitGroup, sendBuf int, lg logger.Logger) *Room {
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &Room{
-		PageID: roomID,
+		PageID:     roomID,
 		clients:    make(map[*Client]bool),
 		register:   make(chan registerRequest),
 		unregister: make(chan unregisterRequest),
@@ -158,4 +158,34 @@ func (r *Room) clientWriter(c *Client) {
 			}
 		}
 	}
+}
+
+func (r *Room) GetParticipants() []domainEntity.UserPresence {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	users := make([]domainEntity.UserPresence, 0, len(r.clients))
+	for client := range r.clients {
+		if client.User != nil {
+			name := ""
+			if client.User.FirstName != nil {
+				name = *client.User.FirstName
+			}
+			if client.User.LastName != nil {
+				if name != "" {
+					name += " "
+				}
+				name += *client.User.LastName
+			}
+			if name == "" {
+				name = client.User.Email
+			}
+
+			users = append(users, domainEntity.UserPresence{
+				ID:   client.User.ID,
+				Name: name,
+			})
+		}
+	}
+	return users
 }

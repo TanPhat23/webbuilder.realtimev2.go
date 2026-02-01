@@ -23,12 +23,12 @@ func NewSnapshotRepository(db *gorm.DB) domainRepo.SnapshotRepository {
 }
 
 // SaveSnapshot persists a new snapshot to the database
-func (r *snapshotRepository) SaveSnapshot(ctx context.Context, pageID string, name string, snapshotType entity.SnapshotType, elements []entity.Element) error {
+func (r *snapshotRepository) SaveSnapshot(ctx context.Context, projectID string, name string, snapshotType entity.SnapshotType, elements []entity.Element) error {
 	snapshot := entity.Snapshot{
 		ID:        uuid.New().String(),
 		Name:      name,
 		Type:      snapshotType,
-		PageID:    pageID,
+		ProjectID: projectID,
 		Timestamp: time.Now().UnixMilli(),
 		Elements:  elements,
 		CreatedAt: time.Now(),
@@ -40,12 +40,12 @@ func (r *snapshotRepository) SaveSnapshot(ctx context.Context, pageID string, na
 	return nil
 }
 
-// GetSnapshot retrieves the latest snapshot for a given page and type
-func (r *snapshotRepository) GetSnapshot(ctx context.Context, pageID string, snapshotType entity.SnapshotType) (*entity.Snapshot, error) {
+// GetSnapshot retrieves the latest snapshot for a given project and type
+func (r *snapshotRepository) GetSnapshot(ctx context.Context, projectID string, snapshotType entity.SnapshotType) (*entity.Snapshot, error) {
 	var snapshot entity.Snapshot
 	err := r.db.WithContext(ctx).
 		Table(entity.Snapshot{}.TableName()).
-		Where(`"PageId" = ? AND "Type" = ?`, pageID, snapshotType).
+		Where(`"ProjectId" = ? AND "Type" = ?`, projectID, snapshotType).
 		Order(`"Timestamp" DESC`).
 		First(&snapshot).Error
 
@@ -58,11 +58,11 @@ func (r *snapshotRepository) GetSnapshot(ctx context.Context, pageID string, sna
 	return &snapshot, nil
 }
 
-// DeleteSnapshot removes snapshots for a given page and type
-func (r *snapshotRepository) DeleteSnapshot(ctx context.Context, pageID string, snapshotType entity.SnapshotType) error {
+// DeleteSnapshot removes snapshots for a given project and type
+func (r *snapshotRepository) DeleteSnapshot(ctx context.Context, projectID string, snapshotType entity.SnapshotType) error {
 	if err := r.db.WithContext(ctx).
 		Table(entity.Snapshot{}.TableName()).
-		Where(`"PageId" = ? AND "Type" = ?`, pageID, snapshotType).
+		Where(`"ProjectId" = ? AND "Type" = ?`, projectID, snapshotType).
 		Delete(&entity.Snapshot{}).Error; err != nil {
 		return fmt.Errorf("failed to delete snapshot: %w", err)
 	}

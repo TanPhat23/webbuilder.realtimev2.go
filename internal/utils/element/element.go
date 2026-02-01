@@ -1,6 +1,10 @@
 package element
 
-import "webbuilder/internal/domain/entity"
+import (
+	"sort"
+
+	"webbuilder/internal/domain/entity"
+)
 
 
 func ParentsEqual(p1, p2 *string) bool {
@@ -67,6 +71,27 @@ func BuildElementTree(elements []entity.Element) []entity.Element {
 			roots = append(roots, el.ID)
 		}
 	}
+
+	for pid, cids := range childrenMap {
+		sort.SliceStable(cids, func(i, j int) bool {
+			a := elementMap[cids[i]]
+			b := elementMap[cids[j]]
+			if a.Order != b.Order {
+				return a.Order < b.Order
+			}
+			return a.ID < b.ID
+		})
+		childrenMap[pid] = cids
+	}
+
+	sort.SliceStable(roots, func(i, j int) bool {
+		a := elementMap[roots[i]]
+		b := elementMap[roots[j]]
+		if a.Order != b.Order {
+			return a.Order < b.Order
+		}
+		return a.ID < b.ID
+	})
 
 	var build func(id string) entity.Element
 	build = func(id string) entity.Element {

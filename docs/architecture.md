@@ -50,7 +50,7 @@ All messages sent over WebSocket follow this standard JSON structure:
 
 #### Document Operations
 - `element:create`: Broadcasts a new element added to the canvas.
-- `element:update`: Performs granular updates (styles, properties, settings).
+- `element:update`: Performs granular updates (styles, settings).
 - `element:delete`: Removes an element.
 - `element:move`: Reorders or changes the parent of an element.
 

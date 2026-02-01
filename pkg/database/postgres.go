@@ -13,6 +13,7 @@ import (
 
 // Config holds the database configuration parameters
 type Config struct {
+	URL      string
 	Host     string
 	Port     string
 	User     string
@@ -21,12 +22,19 @@ type Config struct {
 	SSLMode  string
 }
 
-// NewPostgresConnection initializes a new PostgreSQL connection using GORM
+// NewPostgresConnection initializes a new PostgreSQL connection using GORM.
+// It prioritizes the URL (DSN) if provided, otherwise it builds the DSN from individual fields.
 func NewPostgresConnection(cfg Config) (*gorm.DB, error) {
-	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=UTC",
-		cfg.Host, cfg.User, cfg.Password, cfg.DBName, cfg.Port, cfg.SSLMode,
-	)
+	var dsn string
+
+	if cfg.URL != "" {
+		dsn = cfg.URL
+	} else {
+		dsn = fmt.Sprintf(
+			"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=UTC",
+			cfg.Host, cfg.User, cfg.Password, cfg.DBName, cfg.Port, cfg.SSLMode,
+		)
+	}
 
 	// Configure default logger
 	newLogger := logger.New(
@@ -35,7 +43,7 @@ func NewPostgresConnection(cfg Config) (*gorm.DB, error) {
 			SlowThreshold:             time.Second,   // Slow SQL threshold
 			LogLevel:                  logger.Silent, // Log level
 			IgnoreRecordNotFoundError: true,          // Ignore ErrRecordNotFound error for logger
-			Colorful:                  true,          // Disable color
+			Colorful:                  true,          // Enable color
 		},
 	)
 

@@ -217,3 +217,14 @@ func (h *Hub) listenRedis() {
 		}
 	}
 }
+
+func (h *Hub) GetRoomParticipants(roomID string) []domainEntity.UserPresence {
+	h.mu.RLock()
+	r := h.rooms[roomID]
+	h.mu.RUnlock()
+
+	if r != nil {
+		return r.GetParticipants()
+	}
+	return []domainEntity.UserPresence{}
+}

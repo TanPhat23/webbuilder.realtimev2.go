@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	ulogger "webbuilder/internal/utils/logger"
 
 	"github.com/gofiber/fiber/v2"
@@ -8,8 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 
 	"webbuilder/internal/config"
-	"webbuilder/internal/delivery/ws"
-	domainEntity "webbuilder/internal/domain/entity"
+	"webbuilder/internal/delivery/ws/handlers"
 	"webbuilder/internal/repository"
 	"webbuilder/internal/usecase"
 	"webbuilder/pkg/database"
@@ -18,12 +18,15 @@ import (
 
 func main() {
 	lg := ulogger.Default()
+	ctx := context.Background()
+
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		lg.Fatalf("Failed to load config: %v", err)
 	}
 
 	db, err := database.NewPostgresConnection(database.Config{
+		URL:      cfg.Database.URL,
 		Host:     cfg.Database.Host,
 		Port:     cfg.Database.Port,
 		User:     cfg.Database.User,
@@ -35,22 +38,23 @@ func main() {
 		lg.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// Auto Migrate
-	if err := db.AutoMigrate(
-		&domainEntity.Project{},
-		&domainEntity.Page{},
-		&domainEntity.Element{},
-		&domainEntity.Setting{},
-		&domainEntity.Snapshot{},
-		&domainEntity.EventWorkflow{},
-		&domainEntity.ElementEventWorkflow{},
-		&domainEntity.ElementComment{},
-		&domainEntity.Comment{},
-	); err != nil {
-		lg.Fatalf("Failed to migrate database: %v", err)
-	}
+	// // Auto Migrate
+	// if err := db.AutoMigrate(
+	// 	&domainEntity.Project{},
+	// 	&domainEntity.Page{},
+	// 	&domainEntity.Element{},
+	// 	&domainEntity.Setting{},
+	// 	&domainEntity.Snapshot{},
+	// 	&domainEntity.EventWorkflow{},
+	// 	&domainEntity.ElementEventWorkflow{},
+	// 	&domainEntity.ElementComment{},
+	// 	&domainEntity.Comment{},
+	// ); err != nil {
+	// 	lg.Fatalf("Failed to migrate database: %v", err)
+	// }
 
 	rdb, err := redis.NewRedisClient(redis.Config{
+		URL:      cfg.Redis.URL,
 		Host:     cfg.Redis.Host,
 		Port:     cfg.Redis.Port,
 		Password: cfg.Redis.Password,
@@ -66,8 +70,11 @@ func main() {
 	// Initialize the central UseCase container
 	useCases := usecase.NewUseCase(repos, lg)
 
+	// Start the background persistence worker using the initialized use case
+	go useCases.Persist.Start(ctx)
+
 	// Initialize WebSocket Handler with the central UseCase container
-	wsHandler := ws.NewHandler(useCases, rdb, lg)
+	wsHandler := handlers.NewHandler(useCases, rdb, lg)
 
 	app := fiber.New()
 

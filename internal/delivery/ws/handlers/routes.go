@@ -1,4 +1,4 @@
-package ws
+package handlers
 
 import (
 	"github.com/gofiber/contrib/websocket"

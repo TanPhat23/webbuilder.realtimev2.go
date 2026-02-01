@@ -7,6 +7,7 @@ import (
 	domainEntity "webbuilder/internal/domain/entity"
 	domainRepo "webbuilder/internal/domain/repository"
 	domainUsecase "webbuilder/internal/domain/usecase"
+	elementutils "webbuilder/internal/utils/element"
 )
 
 type documentUseCase struct {
@@ -34,11 +35,14 @@ func (uc *documentUseCase) GetDocument(ctx context.Context, projectID string, pa
 		return nil, fmt.Errorf("failed to fetch page elements from db: %w", err)
 	}
 
-	if err := uc.repo.DocumentRepo.SetDocument(ctx, projectID, pageID, elements); err != nil {
+	// Build hierarchical tree from flat elements before caching/returning.
+	tree := elementutils.BuildElementTree(elements)
+
+	if err := uc.repo.DocumentRepo.SetDocument(ctx, projectID, pageID, tree); err != nil {
 		fmt.Printf("failed to update cache: %v\n", err)
 	}
 
-	return elements, nil
+	return tree, nil
 }
 
 func (uc *documentUseCase) RefreshCache(ctx context.Context, projectID string, pageID string) error {
@@ -47,7 +51,10 @@ func (uc *documentUseCase) RefreshCache(ctx context.Context, projectID string, p
 		return fmt.Errorf("failed to fetch elements for cache refresh: %w", err)
 	}
 
-	if err := uc.repo.DocumentRepo.SetDocument(ctx, projectID, pageID, elements); err != nil {
+	// Cache a hierarchical tree (not a flat list) so consumers get nested children directly.
+	tree := elementutils.BuildElementTree(elements)
+
+	if err := uc.repo.DocumentRepo.SetDocument(ctx, projectID, pageID, tree); err != nil {
 		return fmt.Errorf("failed to refresh cache: %w", err)
 	}
 

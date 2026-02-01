@@ -26,6 +26,16 @@ const (
 	TypeCommentUpdate MessageType = "comment:update" // Comment resolved/edited
 	TypeCommentDelete MessageType = "comment:delete" // Comment removed
 
+	// Workflow Operations
+	TypeWorkflowCreate MessageType = "workflow:create"
+	TypeWorkflowUpdate MessageType = "workflow:update"
+	TypeWorkflowDelete MessageType = "workflow:delete"
+
+	// Element Workflow Operations
+	TypeElementWorkflowCreate MessageType = "element-workflow:create"
+	TypeElementWorkflowUpdate MessageType = "element-workflow:update"
+	TypeElementWorkflowDelete MessageType = "element-workflow:delete"
+
 	// Synchronization
 	TypeSync     MessageType = "sync"     // Initial state request/response
 	TypeSnapshot MessageType = "snapshot" // Save/Load full state
@@ -89,10 +99,32 @@ type PayloadComment struct {
 	Comment   ElementComment `json:"comment"`
 }
 
+// PayloadWorkflow
+type PayloadWorkflow struct {
+	Workflow EventWorkflow `json:"workflow"`
+}
+
+// PayloadWorkflowDelete
+type PayloadWorkflowDelete struct {
+	ID string `json:"id"`
+}
+
+// PayloadElementWorkflow
+type PayloadElementWorkflow struct {
+	Workflow ElementEventWorkflow `json:"workflow"`
+}
+
+// PayloadElementWorkflowDelete
+type PayloadElementWorkflowDelete struct {
+	ElementID string `json:"elementId"`
+}
+
 // PayloadSync provides the initial state to a joining client
 type PayloadSync struct {
-	Elements []Element      `json:"elements"`
-	Users    []UserPresence `json:"users"` // Current active users on page
+	Elements         []Element              `json:"elements"`
+	Workflows        []EventWorkflow        `json:"workflows,omitempty"`
+	ElementWorkflows []ElementEventWorkflow `json:"elementWorkflows,omitempty"`
+	Users            []UserPresence         `json:"users"`
 }
 
 // PayloadSnapshot allows the client to request a forced save to DB

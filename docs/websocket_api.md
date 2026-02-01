@@ -74,7 +74,7 @@ Broadcasts your current activity to other users.
 {
   "element": {
     "type": "text",
-    "properties": {},
+    "settings": {},
     "styles": {},
     "order": 0
   }
@@ -91,9 +91,8 @@ Updates only the provided fields.
 ```json
 {
   "id": "uuid-string",
-  "properties": { "content": "Hello World" },
-  "styles": { "color": "red" },
-  "settings": {}
+  "settings": { "content": "Hello World" },
+  "styles": { "color": "red" }
 }
 ```
 

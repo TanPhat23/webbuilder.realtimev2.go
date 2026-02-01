@@ -48,10 +48,54 @@ func (f *MessageFactory) ElementMove(payload domainEntity.PayloadElementMove) (d
 }
 
 // Sync constructs a synchronization message with the full page state.
-func (f *MessageFactory) Sync(elements []domainEntity.Element, users []domainEntity.UserPresence) (domainEntity.Message, error) {
+func (f *MessageFactory) Sync(elements []domainEntity.Element, workflows []domainEntity.EventWorkflow, elementWorkflows []domainEntity.ElementEventWorkflow, users []domainEntity.UserPresence) (domainEntity.Message, error) {
 	return f.Create(domainEntity.TypeSync, domainEntity.PayloadSync{
-		Elements: elements,
-		Users:    users,
+		Elements:         elements,
+		Workflows:        workflows,
+		ElementWorkflows: elementWorkflows,
+		Users:            users,
+	})
+}
+
+// WorkflowCreate constructs a message for new workflow additions.
+func (f *MessageFactory) WorkflowCreate(workflow domainEntity.EventWorkflow) (domainEntity.Message, error) {
+	return f.Create(domainEntity.TypeWorkflowCreate, domainEntity.PayloadWorkflow{
+		Workflow: workflow,
+	})
+}
+
+// WorkflowUpdate constructs a message for workflow changes.
+func (f *MessageFactory) WorkflowUpdate(workflow domainEntity.EventWorkflow) (domainEntity.Message, error) {
+	return f.Create(domainEntity.TypeWorkflowUpdate, domainEntity.PayloadWorkflow{
+		Workflow: workflow,
+	})
+}
+
+// WorkflowDelete constructs a message for workflow removals.
+func (f *MessageFactory) WorkflowDelete(workflowID string) (domainEntity.Message, error) {
+	return f.Create(domainEntity.TypeWorkflowDelete, domainEntity.PayloadWorkflowDelete{
+		ID: workflowID,
+	})
+}
+
+// ElementWorkflowCreate constructs a message for new element-workflow links.
+func (f *MessageFactory) ElementWorkflowCreate(workflow domainEntity.ElementEventWorkflow) (domainEntity.Message, error) {
+	return f.Create(domainEntity.TypeElementWorkflowCreate, domainEntity.PayloadElementWorkflow{
+		Workflow: workflow,
+	})
+}
+
+// ElementWorkflowUpdate constructs a message for element-workflow link changes.
+func (f *MessageFactory) ElementWorkflowUpdate(workflow domainEntity.ElementEventWorkflow) (domainEntity.Message, error) {
+	return f.Create(domainEntity.TypeElementWorkflowUpdate, domainEntity.PayloadElementWorkflow{
+		Workflow: workflow,
+	})
+}
+
+// ElementWorkflowDelete constructs a message for element-workflow link removals.
+func (f *MessageFactory) ElementWorkflowDelete(elementID string) (domainEntity.Message, error) {
+	return f.Create(domainEntity.TypeElementWorkflowDelete, domainEntity.PayloadElementWorkflowDelete{
+		ElementID: elementID,
 	})
 }
 

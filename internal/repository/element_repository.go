@@ -29,13 +29,14 @@ func (r *elementRepository) CreateElement(ctx context.Context, projectID string,
 	}
 	return nil
 }
+
 // Create Elements from a flattened elements array
 func (r *elementRepository) CreateElements(ctx context.Context, projectID string, pageId string, elements []domainEntity.Element) error {
 	for _, element := range elements {
 		element.PageID = pageId
 	}
 	if err := r.db.WithContext(ctx).CreateInBatches(elements, len(elements)).Error; err != nil {
-		return  err
+		return err
 	}
 	return nil
 }
@@ -128,19 +129,17 @@ func (r *elementRepository) GetElementByID(ctx context.Context, projectID string
 // GetElementsByPageID retrieves all elements for a specific page, ordered by Order
 func (r *elementRepository) GetElementsByPageID(ctx context.Context, projectID string, pageID string) ([]domainEntity.Element, error) {
 	var elems []domainEntity.Element
-
 	err := r.db.WithContext(ctx).
 		Model(&domainEntity.Element{}).
 		Joins(`JOIN "Page" ON "Element"."PageId" = "Page"."Id"`).
 		Where(`"Page"."ProjectId" = ? AND "Element"."PageId" = ?`, projectID, pageID).
-		Order(`"Element"."Order" ASC`).
+		Order(`COALESCE("Element"."ParentId",'') ASC, "Element"."Order" ASC`).
 		Preload("Setting").
 		Preload("Comments").
 		Preload("Comments.Author").
 		Preload("EventWorkflows").
 		Preload("EventWorkflows.Workflow").
 		Find(&elems).Error
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to get elements by page id: %w", err)
 	}
@@ -155,7 +154,7 @@ func (r *elementRepository) GetElementsByProjectID(ctx context.Context, projectI
 		Model(&domainEntity.Element{}).
 		Joins(`JOIN "Page" ON "Element"."PageId" = "Page"."Id"`).
 		Where(`"Page"."ProjectId" = ?`, projectID).
-		Order(`"Page"."Id" ASC, "Element"."Order" ASC`).
+		Order(`"Page"."Id" ASC, COALESCE("Element"."ParentId",'') ASC, "Element"."Order" ASC`).
 		Preload("Setting").
 		Preload("Comments").
 		Preload("Comments.Author").

@@ -119,8 +119,10 @@ func TestFlattenElements_PreservesProperties(t *testing.T) {
 	root := entity.Element{
 		ID:   "withprops",
 		Type: "button",
-		Properties: map[string]any{
-			"foo": "bar",
+		Setting: &entity.Setting{
+			Settings: map[string]any{
+				"foo": "bar",
+			},
 		},
 		Elements: []entity.Element{
 			{ID: "child"},
@@ -141,8 +143,8 @@ func TestFlattenElements_PreservesProperties(t *testing.T) {
 	if rootGot.Type != "button" {
 		t.Fatalf("expected root type %q, got %q", "button", rootGot.Type)
 	}
-	if rootGot.Properties == nil || rootGot.Properties["foo"] != "bar" {
-		t.Fatalf("expected property foo=bar, got %v", rootGot.Properties)
+	if rootGot.Setting == nil || rootGot.Setting.Settings["foo"] != "bar" {
+		t.Fatalf("expected setting foo=bar, got %v", rootGot.Setting)
 	}
 }
 
@@ -237,5 +239,43 @@ func TestBuildElementTree_NoDuplicateRoots(t *testing.T) {
 	got := BuildElementTree(elements)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 root, got %d (duplicate roots)", len(got))
+	}
+}
+
+func TestBuildElementTree_SortsChildrenByOrder(t *testing.T) {
+	elements := []entity.Element{
+		{ID: "root"},
+		{ID: "c1", ParentID: strPtr("root"), Order: 2},
+		{ID: "c2", ParentID: strPtr("root"), Order: 1},
+	}
+
+	got := BuildElementTree(elements)
+	root := findElementByID(got, "root")
+	if root == nil {
+		t.Fatalf("root not found in tree: %v", idsFromElements(got))
+	}
+	if len(root.Elements) != 2 {
+		t.Fatalf("expected 2 children, got %d", len(root.Elements))
+	}
+	if root.Elements[0].ID != "c2" || root.Elements[1].ID != "c1" {
+		t.Fatalf("children not sorted by Order: %v", idsFromElements(root.Elements))
+	}
+}
+
+func TestBuildElementTree_SortsRootsByOrderAndTieBreakers(t *testing.T) {
+	elements := []entity.Element{
+		{ID: "rootA", Order: 2},
+		{ID: "rootB", Order: 1},
+		{ID: "rootC", Order: 1},
+		{ID: "rootD", Order: 1},
+	}
+
+	got := BuildElementTree(elements)
+
+	ids := idsFromElements(got)
+	// Elements should be ordered by Order, then by ID for deterministic tie-breaking.
+	expected := []string{"rootB", "rootC", "rootD", "rootA"}
+	if !reflect.DeepEqual(ids, expected) {
+		t.Fatalf("unexpected root order/ids: got %v, want %v", ids, expected)
 	}
 }

@@ -14,15 +14,17 @@ type Client struct {
 	ProjectID string
 	Conn      *websocket.Conn
 	PageID    string
+	User      *domainEntity.User
 	send      chan domainEntity.Message
 	closeOnce sync.Once
 }
 
-// NewClient constructs a new client for the given connection and page ID.
-func NewClient(conn *websocket.Conn, projectID string) *Client {
+// NewClient constructs a new client for the given connection, project, and user.
+func NewClient(conn *websocket.Conn, projectID string, user *domainEntity.User) *Client {
 	return &Client{
 		Conn:      conn,
 		ProjectID: projectID,
+		User:      user,
 	}
 }
 

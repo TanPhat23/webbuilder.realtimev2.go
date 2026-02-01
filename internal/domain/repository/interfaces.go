@@ -33,9 +33,11 @@ type DocumentRepository interface {
 }
 
 type WorkflowRepository interface {
-	SaveWorkflow(ctx context.Context, projectID string, workflow *entity.EventWorkflow) error
-	GetWorkflow(ctx context.Context, projectID string) (*entity.EventWorkflow, error)
-	DeleteWorkflow(ctx context.Context, projectID string) error
+	CreateWorkflow(ctx context.Context, projectID string, workflow *entity.EventWorkflow) error
+	UpdateWorkflow(ctx context.Context, projectID string, workflow *entity.EventWorkflow) error
+	DeleteWorkflow(ctx context.Context, projectID string, workflowID string) error
+	GetWorkflowByID(ctx context.Context, projectID string, workflowID string) (*entity.EventWorkflow, error)
+	GetWorkflowsByProjectID(ctx context.Context, projectID string) ([]entity.EventWorkflow, error)
 }
 
 type ProjectRepository interface {
@@ -47,10 +49,11 @@ type ProjectRepository interface {
 
 type ElementWorkflowRepository interface {
 	CreateElementWorkflow(ctx context.Context, projectID string, workflow *entity.ElementEventWorkflow) error
-	GetElementWorkflow(ctx context.Context, projectID string, elementID string) (*entity.ElementEventWorkflow, error)
-	GetElementWorkflows(ctx context.Context, projectID string) ([]entity.ElementEventWorkflow, error)
 	UpdateElementWorkflow(ctx context.Context, projectID string, workflow *entity.ElementEventWorkflow) error
 	DeleteElementWorkflow(ctx context.Context, projectID string, elementID string) error
+	GetElementWorkflowByElementID(ctx context.Context, projectID string, elementID string) (*entity.ElementEventWorkflow, error)
+	GetElementWorkflowsByProjectID(ctx context.Context, projectID string) ([]entity.ElementEventWorkflow, error)
+	GetElementWorkflowsByPageID(ctx context.Context, projectID string, pageID string) ([]entity.ElementEventWorkflow, error)
 }
 
 type Repository struct {

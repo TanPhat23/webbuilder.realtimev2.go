@@ -55,9 +55,39 @@ type PersistUseCase interface {
 	Flush(ctx context.Context) error
 }
 
+type WorkflowUseCase interface {
+	// CreateWorkflow creates a new workflow for a project.
+	CreateWorkflow(ctx context.Context, projectID string, workflow *entity.EventWorkflow) error
+	// UpdateWorkflow updates an existing workflow.
+	UpdateWorkflow(ctx context.Context, projectID string, workflow *entity.EventWorkflow) error
+	// RemoveWorkflow deletes a workflow.
+	RemoveWorkflow(ctx context.Context, projectID string, workflowID string) error
+	// GetWorkflowByID retrieves a single workflow.
+	GetWorkflowByID(ctx context.Context, projectID string, workflowID string) (*entity.EventWorkflow, error)
+	// GetWorkflowsByProject retrieves all workflows for a project.
+	GetWorkflowsByProject(ctx context.Context, projectID string) ([]entity.EventWorkflow, error)
+}
+
+type ElementWorkflowsUseCase interface {
+	// AddElementWorkflow creates a new link between an element and a workflow.
+	CreateElementWorkflow(ctx context.Context, projectID string, workflow *entity.ElementEventWorkflow) error
+	// GetElementWorkflowByElementID retrieves a singular event workflow for a specific element.
+	GetElementWorkflowByElementID(ctx context.Context, projectID string, elementID string) (*entity.ElementEventWorkflow, error)
+	// GetWorkflowsByProject retrieves all element-workflow mappings for an entire project.
+	GetWorkflowsByProject(ctx context.Context, projectID string) ([]entity.ElementEventWorkflow, error)
+	// GetWorkflowsByPage retrieves all element-workflow mappings for a specific page.
+	GetWorkflowsByPage(ctx context.Context, projectID string, pageID string) ([]entity.ElementEventWorkflow, error)
+	// UpdateElementWorkflow updates an existing element-workflow mapping.
+	UpdateElementWorkflow(ctx context.Context, projectID string, workflow *entity.ElementEventWorkflow) error
+	// RemoveElementWorkflow deletes workflow mappings for a specific element.
+	RemoveElementWorkflow(ctx context.Context, projectID string, elementID string) error
+}
+
 // UseCase provides a central container for all use case interfaces.
 type UseCase struct {
-	Element  ElementUseCase
-	Document DocumentUseCase
-	Persist  PersistUseCase
+	Element          ElementUseCase
+	Document         DocumentUseCase
+	Persist          PersistUseCase
+	Workflow         WorkflowUseCase
+	ElementWorkflows ElementWorkflowsUseCase
 }
