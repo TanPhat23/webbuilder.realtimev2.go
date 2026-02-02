@@ -46,7 +46,6 @@ type DocumentUseCase interface {
 	AddElementsToDocument(ctx context.Context, projectID string, pageID string, elements []entity.Element) error
 }
 
-
 type PersistUseCase interface {
 	Start(ctx context.Context)
 

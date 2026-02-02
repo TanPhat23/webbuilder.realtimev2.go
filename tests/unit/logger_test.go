@@ -1,17 +1,16 @@
-package logger
+package unit
 
 import (
 	"bytes"
 	"strings"
 	"testing"
-)
 
-// compile-time interface compliance check
-var _ Logger = (*MyLogger)(nil)
+	"webbuilder/internal/utils/logger"
+)
 
 func TestMyLogger_Basic(t *testing.T) {
 	var buf bytes.Buffer
-	l := New(&buf, "", 0) // deterministic: no flags
+	l := logger.New(&buf, "", 0) // deterministic: no flags
 
 	l.Info("hello", "world")
 	l.Infof("value=%d", 42)
@@ -40,16 +39,16 @@ func TestMyLogger_Basic(t *testing.T) {
 
 func TestNewWithNilWriterAndDefaults(t *testing.T) {
 	// New with nil writer should return a usable logger (writes to stdout in that case).
-	l := New(nil, "", 0)
+	l := logger.New(nil, "", 0)
 	if l == nil {
 		t.Fatal("expected non-nil logger from New(nil, ...)")
 	}
 
 	// Default logger should also be non-nil and satisfy the Logger interface.
-	if Default() == nil {
+	if logger.Default() == nil {
 		t.Fatal("Default() returned nil")
 	}
-	if DefaultLogger == nil {
+	if logger.DefaultLogger == nil {
 		t.Fatal("DefaultLogger is nil")
 	}
 }

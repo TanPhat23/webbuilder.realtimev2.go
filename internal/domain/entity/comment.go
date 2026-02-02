@@ -18,8 +18,8 @@ type ElementComment struct {
 	UpdatedAt time.Time      `json:"updatedAt" gorm:"column:UpdatedAt"`
 	DeletedAt gorm.DeletedAt `json:"deletedAt,omitempty" gorm:"column:DeletedAt;index"`
 
-	Author    *User    `json:"author,omitempty" gorm:"foreignKey:AuthorID;references:ID"`
-	Element   *Element `json:"element,omitempty" gorm:"foreignKey:ElementID;references:ID"`
+	Author  *User    `json:"author,omitempty" gorm:"foreignKey:AuthorID;references:ID"`
+	Element *Element `json:"element,omitempty" gorm:"foreignKey:ElementID;references:ID"`
 }
 
 // TableName sets the database table name for ElementComment.
@@ -41,9 +41,9 @@ type Comment struct {
 	UpdatedAt time.Time      `json:"updatedAt" gorm:"column:updated_at"`
 	DeletedAt gorm.DeletedAt `json:"deletedAt,omitempty" gorm:"column:deleted_at;index"`
 
-	Author  *User            `json:"author,omitempty" gorm:"foreignKey:AuthorID;references:ID"`
-	Parent  *Comment         `json:"parent,omitempty" gorm:"foreignKey:ParentID;references:ID"`
-	Replies []Comment        `json:"replies,omitempty" gorm:"foreignKey:ParentID"`
+	Author  *User     `json:"author,omitempty" gorm:"foreignKey:AuthorID;references:ID"`
+	Parent  *Comment  `json:"parent,omitempty" gorm:"foreignKey:ParentID;references:ID"`
+	Replies []Comment `json:"replies,omitempty" gorm:"foreignKey:ParentID"`
 }
 
 // TableName sets the database table name for Comment.

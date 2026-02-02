@@ -51,12 +51,14 @@ A high-performance, horizontally scalable real-time synchronization backend for 
 ### Installation
 
 1. Clone the repository:
+
    ```bash
    git clone <repository-url>
    cd webbuilderv2.realtime.go
    ```
 
 2. Install dependencies:
+
    ```bash
    go mod download
    ```
@@ -76,6 +78,7 @@ The engine exposes a WebSocket endpoint for real-time interaction:
 `ws://localhost:3000/ws/:projectId`
 
 Key message types include:
+
 - `join`: Join a specific page context.
 - `presence`: Share cursor positions.
 - `element:create / update / move / delete`: Collaborative canvas operations.

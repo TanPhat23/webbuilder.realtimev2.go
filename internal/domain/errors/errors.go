@@ -18,14 +18,14 @@ var (
 
 // Error codes for consistent machine-readable identification across WebSocket/API
 const (
-	CodeNotFound       = "NOT_FOUND"
-	CodeValidation     = "VALIDATION_ERROR"
-	CodeInternal       = "INTERNAL_ERROR"
-	CodeUnauthorized   = "UNAUTHORIZED"
-	CodeConflict       = "CONFLICT"
-	CodeJoinRequired   = "JOIN_REQUIRED"
-	CodeProcessError   = "PROCESS_ERROR"
-	CodeAccessDenied   = "ACCESS_DENIED"
+	CodeNotFound     = "NOT_FOUND"
+	CodeValidation   = "VALIDATION_ERROR"
+	CodeInternal     = "INTERNAL_ERROR"
+	CodeUnauthorized = "UNAUTHORIZED"
+	CodeConflict     = "CONFLICT"
+	CodeJoinRequired = "JOIN_REQUIRED"
+	CodeProcessError = "PROCESS_ERROR"
+	CodeAccessDenied = "ACCESS_DENIED"
 )
 
 // AppError is a structured error that carries a domain-specific code

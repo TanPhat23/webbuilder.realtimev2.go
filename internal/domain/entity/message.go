@@ -37,9 +37,10 @@ const (
 	TypeElementWorkflowDelete MessageType = "element-workflow:delete"
 
 	// Synchronization
-	TypeSync     MessageType = "sync"     // Initial state request/response
-	TypeSnapshot MessageType = "snapshot" // Save/Load full state
-	TypeError    MessageType = "error"    // Server-side error reporting
+	TypeSync        MessageType = "sync"         // Initial state request/response
+	TypeSyncProject MessageType = "sync:project" // Project-wide sync
+	TypeSnapshot    MessageType = "snapshot"     // Save/Load full state
+	TypeError       MessageType = "error"        // Server-side error reporting
 )
 
 // Message is the top-level envelope for all WebSocket communication
@@ -52,13 +53,20 @@ type Message struct {
 	Payload   json.RawMessage `json:"payload,omitempty"`
 }
 
+type PayloadSyncProject struct {
+	Elements         []Element              `json:"elements,omitempty"`
+	Workflows        []EventWorkflow        `json:"workflows,omitempty"`
+	ElementWorkflows []ElementEventWorkflow `json:"elementWorkflows,omitempty"`
+	Users            []UserPresence         `json:"users,omitempty"`
+}
+
 // PayloadPresence tracks user activity for "Who's here" and cursor pins
 type PayloadPresence struct {
 	UserID    string         `json:"userId"`
 	UserName  string         `json:"userName"`
 	CursorX   float64        `json:"cursorX"`
 	CursorY   float64        `json:"cursorY"`
-	ElementID string         `json:"elementId,omitempty"` 
+	ElementID string         `json:"elementId,omitempty"`
 	Meta      map[string]any `json:"meta,omitempty"`
 }
 
@@ -122,7 +130,6 @@ type PayloadElementWorkflowDelete struct {
 // PayloadSync provides the initial state to a joining client
 type PayloadSync struct {
 	Elements         []Element              `json:"elements"`
-	Workflows        []EventWorkflow        `json:"workflows,omitempty"`
 	ElementWorkflows []ElementEventWorkflow `json:"elementWorkflows,omitempty"`
 	Users            []UserPresence         `json:"users"`
 }
@@ -141,10 +148,10 @@ type PayloadError struct {
 
 // UserPresence is a lightweight view of an active collaborator
 type UserPresence struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	LastSeen  time.Time `json:"lastSeen"`
-	ActiveOn  string    `json:"activeOn"` // ElementID being edited
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	LastSeen time.Time `json:"lastSeen"`
+	ActiveOn string    `json:"activeOn"` // ElementID being edited
 }
 
 // NewMessage helper to construct a standard response

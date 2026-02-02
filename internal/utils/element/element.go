@@ -6,7 +6,6 @@ import (
 	"webbuilder/internal/domain/entity"
 )
 
-
 func ParentsEqual(p1, p2 *string) bool {
 	if p1 == nil && p2 == nil {
 		return true

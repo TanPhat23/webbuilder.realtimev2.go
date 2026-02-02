@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 
 	"webbuilder/internal/config"
+	"webbuilder/internal/delivery/http/middleware"
 	"webbuilder/internal/delivery/ws/handlers"
 	"webbuilder/internal/repository"
 	"webbuilder/internal/usecase"
@@ -38,7 +39,7 @@ func main() {
 		lg.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// // Auto Migrate
+	// Auto Migrate
 	// if err := db.AutoMigrate(
 	// 	&domainEntity.Project{},
 	// 	&domainEntity.Page{},
@@ -84,6 +85,8 @@ func main() {
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.SendString("OK")
 	})
+
+	app.Use(middleware.AuthMiddleware(cfg))
 
 	wsHandler.SetupRoutes(app)
 

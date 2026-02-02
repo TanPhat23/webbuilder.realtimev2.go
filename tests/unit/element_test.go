@@ -1,10 +1,11 @@
-package element
+package unit
 
 import (
 	"reflect"
 	"testing"
 
 	"webbuilder/internal/domain/entity"
+	"webbuilder/internal/utils/element"
 )
 
 func strPtr(s string) *string {
@@ -71,7 +72,7 @@ func TestFlattenElements_TableDriven(t *testing.T) {
 				origFirstRootChildren = len(tc.input[0].Elements)
 			}
 
-			got := FlattenElements(tc.input)
+			got := element.FlattenElements(tc.input)
 
 			if len(tc.wantIDs) == 0 {
 				if len(got) != 0 {
@@ -129,7 +130,7 @@ func TestFlattenElements_PreservesProperties(t *testing.T) {
 		},
 	}
 
-	got := FlattenElements([]entity.Element{root})
+	got := element.FlattenElements([]entity.Element{root})
 
 	if len(got) != 2 {
 		t.Fatalf("expected 2 elements in flattened result, got %d", len(got))
@@ -167,7 +168,7 @@ func TestBuildElementTree_Basic(t *testing.T) {
 		{ID: "child", ParentID: strPtr("root")},
 	}
 
-	got := BuildElementTree(elements)
+	got := element.BuildElementTree(elements)
 
 	if len(got) != 1 {
 		t.Fatalf("expected 1 root element, got %d", len(got))
@@ -197,7 +198,7 @@ func TestBuildElementTree_MultipleRootsAndSiblings(t *testing.T) {
 		{ID: "r2c1", ParentID: strPtr("r2")},
 	}
 
-	got := BuildElementTree(elements)
+	got := element.BuildElementTree(elements)
 
 	if len(got) != 2 {
 		t.Fatalf("expected 2 root elements, got %d", len(got))
@@ -225,7 +226,7 @@ func TestBuildElementTree_OrphanBecomesRoot(t *testing.T) {
 		{ID: "orphan", ParentID: strPtr("missing")},
 	}
 
-	got := BuildElementTree(elements)
+	got := element.BuildElementTree(elements)
 	if len(got) != 1 || got[0].ID != "orphan" {
 		t.Fatalf("expected orphan to become root, got %v", idsFromElements(got))
 	}
@@ -236,7 +237,7 @@ func TestBuildElementTree_NoDuplicateRoots(t *testing.T) {
 		{ID: "r"},
 	}
 
-	got := BuildElementTree(elements)
+	got := element.BuildElementTree(elements)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 root, got %d (duplicate roots)", len(got))
 	}
@@ -249,7 +250,7 @@ func TestBuildElementTree_SortsChildrenByOrder(t *testing.T) {
 		{ID: "c2", ParentID: strPtr("root"), Order: 1},
 	}
 
-	got := BuildElementTree(elements)
+	got := element.BuildElementTree(elements)
 	root := findElementByID(got, "root")
 	if root == nil {
 		t.Fatalf("root not found in tree: %v", idsFromElements(got))
@@ -270,7 +271,7 @@ func TestBuildElementTree_SortsRootsByOrderAndTieBreakers(t *testing.T) {
 		{ID: "rootD", Order: 1},
 	}
 
-	got := BuildElementTree(elements)
+	got := element.BuildElementTree(elements)
 
 	ids := idsFromElements(got)
 	// Elements should be ordered by Order, then by ID for deterministic tie-breaking.

@@ -95,7 +95,6 @@ func (uc *elementUseCase) UpdateElement(ctx context.Context, projectID string, p
 	found := false
 	for i := range flat {
 		if flat[i].ID == element.ID {
-			// Apply updates
 			flat[i] = *element
 			found = true
 			break

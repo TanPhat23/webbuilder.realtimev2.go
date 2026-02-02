@@ -12,6 +12,7 @@ type Config struct {
 	ServerPort string
 	Database   DatabaseConfig
 	Redis      RedisConfig
+	DevMode    bool
 }
 
 // DatabaseConfig holds PostgreSQL configuration
@@ -40,7 +41,7 @@ func LoadConfig() (*Config, error) {
 	_ = godotenv.Load()
 
 	return &Config{
-		ServerPort: getEnv("SERVER_PORT", "3000"),
+		ServerPort: getEnv("SERVER_PORT", "8080"),
 		Database: DatabaseConfig{
 			URL:      getEnv("DATABASE_URL", ""),
 			Host:     getEnv("DB_HOST", "localhost"),
@@ -57,6 +58,7 @@ func LoadConfig() (*Config, error) {
 			Password: getEnv("REDIS_PASSWORD", ""),
 			DB:       getEnvAsInt("REDIS_DB", 0),
 		},
+		DevMode: getEnvAsBool("DEV_MODE", false),
 	}, nil
 }
 
@@ -72,6 +74,16 @@ func getEnvAsInt(key string, fallback int) int {
 		i, err := strconv.Atoi(value)
 		if err == nil {
 			return i
+		}
+	}
+	return fallback
+}
+
+func getEnvAsBool(key string, fallback bool) bool {
+	if value, ok := os.LookupEnv(key); ok {
+		b, err := strconv.ParseBool(value)
+		if err == nil {
+			return b
 		}
 	}
 	return fallback

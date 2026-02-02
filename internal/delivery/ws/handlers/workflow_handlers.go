@@ -19,7 +19,7 @@ func (h *Handler) handleWorkflowCreate(ctx context.Context, client *wsentity.Cli
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().WorkflowCreate(payload.Workflow)
+	broadcastMsg, _ := client.Factory().CreateWorkflow(payload.Workflow)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
@@ -34,7 +34,7 @@ func (h *Handler) handleWorkflowUpdate(ctx context.Context, client *wsentity.Cli
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().WorkflowUpdate(payload.Workflow)
+	broadcastMsg, _ := client.Factory().UpdateWorkflow(payload.Workflow)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
@@ -49,7 +49,7 @@ func (h *Handler) handleWorkflowDelete(ctx context.Context, client *wsentity.Cli
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().WorkflowDelete(payload.ID)
+	broadcastMsg, _ := client.Factory().DeleteWorkflow(payload.ID)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
@@ -64,7 +64,7 @@ func (h *Handler) handleElementWorkflowCreate(ctx context.Context, client *wsent
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().ElementWorkflowCreate(payload.Workflow)
+	broadcastMsg, _ := client.Factory().CreateElementWorkflow(payload.Workflow)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
@@ -79,7 +79,7 @@ func (h *Handler) handleElementWorkflowUpdate(ctx context.Context, client *wsent
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().ElementWorkflowUpdate(payload.Workflow)
+	broadcastMsg, _ := client.Factory().UpdateElementWorkflow(payload.Workflow)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
@@ -94,7 +94,7 @@ func (h *Handler) handleElementWorkflowDelete(ctx context.Context, client *wsent
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().ElementWorkflowDelete(payload.ElementID)
+	broadcastMsg, _ := client.Factory().DeleteElementWorkflow(payload.ElementID)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }

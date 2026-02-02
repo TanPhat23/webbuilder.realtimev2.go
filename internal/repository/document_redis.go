@@ -75,7 +75,7 @@ func (r *documentRepository) DeleteDocument(ctx context.Context, projectID strin
 	return nil
 }
 
-func (r *documentRepository) MarkPageDirty(ctx context.Context, projectID string, pageID string) error  {
+func (r *documentRepository) MarkPageDirty(ctx context.Context, projectID string, pageID string) error {
 	val := fmt.Sprintf("%s:%s", projectID, pageID)
 	return r.client.SAdd(ctx, dirtyPageKey, val).Err()
 }
@@ -83,15 +83,15 @@ func (r *documentRepository) MarkPageDirty(ctx context.Context, projectID string
 func (r *documentRepository) PopDirtyPages(ctx context.Context, limit int) ([]domainEntity.DirtyPage, error) {
 	results, err := r.client.SPopN(ctx, dirtyPageKey, int64(limit)).Result()
 	if err != nil {
-		if err == redis.Nil{
+		if err == redis.Nil {
 			return nil, nil
 		}
 		return nil, err
 	}
 	var dirtyPages []domainEntity.DirtyPage
-	for _, result := range results{
+	for _, result := range results {
 		parts := strings.SplitN(result, ":", 2)
-		if len(parts) == 2{
+		if len(parts) == 2 {
 			dirtyPages = append(dirtyPages, domainEntity.DirtyPage{
 				ProjectID: parts[0],
 				PageID:    parts[1],

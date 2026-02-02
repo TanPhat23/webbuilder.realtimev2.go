@@ -15,10 +15,8 @@ import (
 	"webbuilder/internal/utils/logger"
 )
 
-// MessageHandler defines the function signature for processing a specific message type.
 type MessageHandler func(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error
 
-// Handler manages WebSocket connections and delegates messages to specific command handlers.
 type Handler struct {
 	uc       *domainUsecase.UseCase
 	hub      *wsentity.Hub
@@ -30,7 +28,6 @@ type Handler struct {
 	logger   logger.Logger
 }
 
-// NewHandler initializes a new WebSocket handler with registered command handlers.
 func NewHandler(uc *domainUsecase.UseCase, rdb *redis.Client, lg logger.Logger) *Handler {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Handler{
@@ -49,10 +46,11 @@ func NewHandler(uc *domainUsecase.UseCase, rdb *redis.Client, lg logger.Logger) 
 func (h *Handler) registerHandlers() {
 	h.handlers = map[domainEntity.MessageType]MessageHandler{
 		// Presence & Sync
-		domainEntity.TypeJoin:     h.handleJoin,
-		domainEntity.TypeLeave:    h.handleLeave,
-		domainEntity.TypePresence: h.handlePresence,
-		domainEntity.TypeSync:     h.handleSync,
+		domainEntity.TypeJoin:        h.handleJoin,
+		domainEntity.TypeLeave:       h.handleLeave,
+		domainEntity.TypePresence:    h.handlePresence,
+		domainEntity.TypeSync:        h.handleSync,
+		domainEntity.TypeSyncProject: h.handleSyncProject,
 
 		// Element Operations
 		domainEntity.TypeElementCreate: h.handleElementCreate,
@@ -74,6 +72,7 @@ func (h *Handler) registerHandlers() {
 func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 	projectID := c.Params("project")
 	user, _ := c.Locals("user").(*domainEntity.User)
+	h.logger.Infof("New WebSocket connection: projectID=%s, userID=%s", projectID, user.ID)
 	client := wsentity.NewClient(c, projectID, user)
 
 	if projectID == "" {
@@ -84,6 +83,14 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 	}
 
 	ctx := context.Background()
+
+	projElements, _ := h.uc.Element.GetElementsByProjectID(ctx, client.ProjectID)
+	projWorkflows, _ := h.uc.Workflow.GetWorkflowsByProject(ctx, client.ProjectID)
+	projElementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByProject(ctx, client.ProjectID)
+	syncProjMsg, _ := client.Factory().SyncProject(projElements, projWorkflows, projElementWorkflows, nil)
+	if err := client.Send(syncProjMsg); err != nil {
+		h.logger.Errorf("failed to send initial project sync to client: %v", err)
+	}
 
 	defer func() {
 		_ = h.hub.Unregister(h.ctx, client)

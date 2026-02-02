@@ -11,16 +11,17 @@ import (
 )
 
 func (h *Handler) handleElementCreate(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
-	if client.PageID == "" {
-		return domainErrors.ErrNotJoined
-	}
-
+	h.logger.Debug("handleElementCreate called")
+	h.logger.Debugf("%v", msg)
 	var payload domainEntity.PayloadElementCreate
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
 
-	payload.Element.PageID = client.PageID
+
+	if client.PageID != "" {
+		payload.Element.PageID = client.PageID
+	}
 	if err := validation.ValidateElementCreate(&payload); err != nil {
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
@@ -29,7 +30,7 @@ func (h *Handler) handleElementCreate(ctx context.Context, client *wsentity.Clie
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().ElementCreate(payload.Element)
+	broadcastMsg, _ := client.Factory().CreateElement(payload.Element)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
@@ -53,7 +54,7 @@ func (h *Handler) handleElementUpdate(ctx context.Context, client *wsentity.Clie
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().ElementUpdate(payload)
+	broadcastMsg, _ := client.Factory().UpdateElement(payload)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
@@ -72,7 +73,7 @@ func (h *Handler) handleElementDelete(ctx context.Context, client *wsentity.Clie
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().ElementDelete(payload.ID)
+	broadcastMsg, _ := client.Factory().DeleteElement(payload.ID)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
@@ -96,7 +97,7 @@ func (h *Handler) handleElementMove(ctx context.Context, client *wsentity.Client
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().ElementMove(payload)
+	broadcastMsg, _ := client.Factory().MoveElement(payload)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }

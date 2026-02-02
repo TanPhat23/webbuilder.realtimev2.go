@@ -10,9 +10,9 @@ import (
 // This matches the Prisma Page model.
 type Page struct {
 	ID        string         `json:"id" gorm:"primaryKey;column:Id"`
-	Name      string         `json:"name" gorm:"type:varchar(255);uniqueIndex:ux_project_page_name"`
-	Type      string         `json:"type" gorm:"type:varchar(50);index"`
-	Styles    map[string]any `json:"styles" gorm:"serializer:json;type:jsonb"`
+	Name      string         `json:"name" gorm:"column:Name;type:varchar(255);uniqueIndex:ux_project_page_name"`
+	Type      string         `json:"type" gorm:"column:Type;type:varchar(50);index"`
+	Styles    map[string]any `json:"styles" gorm:"column:Styles;serializer:json;type:jsonb"`
 	ProjectID string         `json:"projectId" gorm:"column:ProjectId;index;uniqueIndex:ux_project_page_name"`
 	CreatedAt time.Time      `json:"createdAt" gorm:"column:CreatedAt"`
 	UpdatedAt time.Time      `json:"updatedAt" gorm:"column:UpdatedAt"`
@@ -55,6 +55,7 @@ func (User) TableName() string {
 type Collaborator struct {
 	ID        string `json:"id" gorm:"primaryKey;column:Id"`
 	ProjectID string `json:"projectId" gorm:"column:ProjectId;index"`
+	UserID    string `json:"userId" gorm:"column:UserId;index"`
 }
 
 func (Collaborator) TableName() string {
@@ -64,6 +65,7 @@ func (Collaborator) TableName() string {
 type Invitation struct {
 	ID        string `json:"id" gorm:"primaryKey;column:Id"`
 	ProjectID string `json:"projectId" gorm:"column:ProjectId;index"`
+	Email     string `json:"email" gorm:"column:Email;type:varchar(255)"`
 }
 
 func (Invitation) TableName() string {

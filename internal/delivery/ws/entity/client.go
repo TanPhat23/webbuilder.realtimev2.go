@@ -84,6 +84,11 @@ func (c *Client) Close() {
 }
 
 // Factory returns a MessageFactory initialized with the client's context.
+// If the client has an associated user, the user's ID will be passed so
+// created messages automatically populate the envelope's userId field.
 func (c *Client) Factory() *MessageFactory {
+	if c.User != nil && c.User.ID != "" {
+		return NewMessageFactory(c.ProjectID, c.PageID, c.User.ID)
+	}
 	return NewMessageFactory(c.ProjectID, c.PageID)
 }

@@ -24,17 +24,23 @@ func (h *Handler) handleJoin(ctx context.Context, client *wsentity.Client, msg d
 		return err
 	}
 
-	// Send initial synchronization state (refresh cache and propagate errors)
 	elements, err := h.uc.Element.SyncPage(ctx, client.ProjectID, client.PageID)
 	if err != nil {
 		return err
 	}
-	workflows, _ := h.uc.Workflow.GetWorkflowsByProject(ctx, client.ProjectID)
 	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByPage(ctx, client.ProjectID, client.PageID)
 
 	users := h.hub.GetRoomParticipants(client.RoomID())
-	syncMsg, _ := client.Factory().Sync(elements, workflows, elementWorkflows, users)
+	syncMsg, _ := client.Factory().SyncPage(elements, elementWorkflows, users)
 	_ = client.Send(syncMsg)
+
+	projElements, _ := h.uc.Element.GetElementsByProjectID(ctx, client.ProjectID)
+	projWorkflows, _ := h.uc.Workflow.GetWorkflowsByProject(ctx, client.ProjectID)
+	projElementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByProject(ctx, client.ProjectID)
+
+	syncProjMsg, _ := client.Factory().SyncProject(projElements, projWorkflows, projElementWorkflows, nil)
+	h.hub.BroadcastProject(client.ProjectID, syncProjMsg, client)
+
 	return nil
 }
 
@@ -52,7 +58,7 @@ func (h *Handler) handlePresence(ctx context.Context, client *wsentity.Client, m
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
 
-	broadcastMsg, _ := client.Factory().Presence(payload)
+	broadcastMsg, _ := client.Factory().BroadcastPresence(payload)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
@@ -67,11 +73,27 @@ func (h *Handler) handleSync(ctx context.Context, client *wsentity.Client, msg d
 		return err
 	}
 
-	workflows, _ := h.uc.Workflow.GetWorkflowsByProject(ctx, client.ProjectID)
 	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByPage(ctx, client.ProjectID, client.PageID)
 
 	users := h.hub.GetRoomParticipants(client.RoomID())
-	syncMsg, _ := client.Factory().Sync(elements, workflows, elementWorkflows, users)
+	syncMsg, _ := client.Factory().SyncPage(elements, elementWorkflows, users)
 	_ = client.Send(syncMsg)
 	return nil
+}
+
+func (h *Handler) handleSyncProject(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+	elements, err := h.uc.Element.GetElementsByProjectID(ctx, client.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	workflows, _ := h.uc.Workflow.GetWorkflowsByProject(ctx, client.ProjectID)
+	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByProject(ctx, client.ProjectID)
+
+	syncMsg, err := client.Factory().SyncProject(elements, workflows, elementWorkflows, nil)
+	if err != nil {
+		return err
+	}
+
+	return client.Send(syncMsg)
 }

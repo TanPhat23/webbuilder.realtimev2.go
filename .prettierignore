@@ -1,0 +1,29 @@
+# Dependency directories
+node_modules/
+vendor/
+
+# Build artifacts
+bin/
+dist/
+out/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go specific (though Prettier doesn't format Go, we ignore Go files)
+*.go
+go.mod
+go.sum
+
+# Coverage and Logs
+coverage.out
+*.log
+
+# Git
+.git/
+
+# IDEs
+.vscode/
+.idea/

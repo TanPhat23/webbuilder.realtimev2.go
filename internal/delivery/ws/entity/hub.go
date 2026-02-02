@@ -3,6 +3,7 @@ package entity
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 
 	domainEntity "webbuilder/internal/domain/entity"
@@ -163,6 +164,23 @@ func (h *Hub) Broadcast(roomID string, msg domainEntity.Message, sender *Client)
 		if err := h.redisClient.Publish(h.parentCtx, channel, payload).Err(); err != nil {
 			h.logger.Errorf("failed to publish to redis: %v", err)
 		}
+	}
+}
+
+// BroadcastProject sends a message to all rooms within a project (project-level and per-page rooms).
+// It collects all rooms whose ID equals 'projectID' or starts with 'projectID:' and broadcasts to each.
+func (h *Hub) BroadcastProject(projectID string, msg domainEntity.Message, sender *Client) {
+	h.mu.RLock()
+	roomIDs := make([]string, 0, len(h.rooms))
+	for rid := range h.rooms {
+		if rid == projectID || strings.HasPrefix(rid, projectID+":") {
+			roomIDs = append(roomIDs, rid)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, rid := range roomIDs {
+		h.Broadcast(rid, msg, sender)
 	}
 }
 
