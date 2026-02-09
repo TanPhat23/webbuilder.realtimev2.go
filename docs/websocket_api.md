@@ -9,7 +9,20 @@ The WebSocket endpoint is dynamic based on the project ID.
 - **URL:** `ws://<host>:<port>/ws/:project`
 - **Protocol:** `json`
 
-Example: `ws://localhost:3000/ws/my-project-id`
+Example: `ws://localhost:8080/ws/my-project-id`
+
+Authentication note:
+
+- The server expects an Authorization header on the WebSocket upgrade request (for example: `Authorization: Bearer <token>`). Node clients (e.g., `ws`) can send headers on the handshake.
+- Note: Browsers' native WebSocket API cannot set arbitrary request headers on the initial handshake. For browser-based clients, pass the token in a query parameter (for example: `wss://host/ws/my-project-id?token=<jwt>`) or use cookies and ensure the server reads the token from the query string or cookie during the upgrade.
+- Example (Node `ws` client):
+
+```js
+const WebSocket = require('ws');
+const ws = new WebSocket('ws://localhost:8080/ws/my-project-id', {
+  headers: { Authorization: 'Bearer <token>' },
+});
+```
 
 ---
 
