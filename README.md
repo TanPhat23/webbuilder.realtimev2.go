@@ -14,7 +14,7 @@ A high-performance, horizontally scalable real-time synchronization backend for 
 
 ## 🛠 Tech Stack
 
-- **Language:** Go (1.25+)
+- **Language:** Go (1.25.5+)
 - **Web Framework:** [Fiber v2](https://gofiber.io/)
 - **WebSocket:** [Fiber WebSocket Contrib](https://github.com/gofiber/contrib/tree/main/websocket)
 - **Database:** PostgreSQL with [GORM](https://gorm.io/)
@@ -44,7 +44,7 @@ A high-performance, horizontally scalable real-time synchronization backend for 
 
 ### Prerequisites
 
-- Go 1.21 or higher
+- Go 1.25.5 or higher
 - PostgreSQL instance
 - Redis instance
 
@@ -71,11 +71,45 @@ A high-performance, horizontally scalable real-time synchronization backend for 
    go run cmd/api/main.go
    ```
 
+### Configuration
+
+The application loads configuration from environment variables (defaults shown):
+
+- `SERVER_PORT` — default `8080`
+- `DATABASE_URL` — default `""` (if set, it takes precedence over individual DB\_\* variables)
+- `DB_HOST` — default `localhost`
+- `DB_PORT` — default `5432`
+- `DB_USER` — default `postgres`
+- `DB_PASSWORD` — default `postgres`
+- `DB_NAME` — default `webbuilder`
+- `DB_SSLMODE` — default `disable`
+- `REDIS_URL` — default `""` (if set, it takes precedence over individual REDIS\_\* variables)
+- `REDIS_HOST` — default `localhost`
+- `REDIS_PORT` — default `6379`
+- `REDIS_PASSWORD` — default `""`
+- `REDIS_DB` — default `0`
+- `DEV_MODE` — default `false`. When `DEV_MODE=true`, the HTTP middleware runs in Dev Mode and injects a placeholder user for requests. Note: token validation (JWT/session) is not implemented and is marked as TODO in the code.
+
+### Development
+
+Useful Makefile targets:
+
+- `make deps` — download and tidy dependencies
+- `make build` — build the binary
+- `make run` — build and run the binary
+- `make test` — run tests
+- `make seed CMD=user` — seed the database (usage: `make seed CMD=user`)
+- `make docker-build` / `make docker-run` — docker build/run targets
+
+Notes:
+
+- Database auto-migration is commented out in `cmd/api/main.go`. Enable it there if you want the app to auto-migrate on startup.
+
 ## 📡 WebSocket API
 
 The engine exposes a WebSocket endpoint for real-time interaction:
 
-`ws://localhost:3000/ws/:projectId`
+`ws://localhost:8080/ws/:projectId`
 
 Key message types include:
 
