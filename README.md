@@ -88,7 +88,8 @@ The application loads configuration from environment variables (defaults shown):
 - `REDIS_PORT` — default `6379`
 - `REDIS_PASSWORD` — default `""`
 - `REDIS_DB` — default `0`
-- `DEV_MODE` — default `false`. When `DEV_MODE=true`, the HTTP middleware runs in Dev Mode and injects a placeholder user for requests. Note: token validation (JWT/session) is not implemented and is marked as TODO in the code.
+- `DEV_USER_ID` — default `dev-user-id`. When `DEV_MODE=true`, this value will be used as the placeholder user ID.
+- `DEV_MODE` — default `false`. When `DEV_MODE=true`, the HTTP middleware runs in Dev Mode and injects a placeholder user for requests (see `DEV_USER_ID`). Note: token validation (JWT/session) is not implemented and is marked as TODO in the code.
 
 ### Development
 
