@@ -15,7 +15,6 @@ var validate *validator.Validate
 func init() {
 	validate = validator.New()
 
-	// Use the `json` tag name in error messages where applicable.
 	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
 		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
 		if name == "-" || name == "" {
@@ -25,7 +24,6 @@ func init() {
 	})
 }
 
-// ValidatePresence validates user presence info (cursor, active element)
 func ValidatePresence(p *domainEntity.PayloadPresence) error {
 	if p == nil {
 		return fmt.Errorf("payload is nil")
@@ -110,25 +108,42 @@ func ValidateComment(p *domainEntity.PayloadComment) error {
 	return nil
 }
 
-// ValidateElementForAdd validates an Element struct for creation
-func ValidateElementForAdd(e *domainEntity.Element) error {
-	if e == nil {
-		return fmt.Errorf("element is nil")
+	// ValidateElementForAdd validates an Element struct for creation
+	func ValidateElementForAdd(e *domainEntity.Element) error {
+		if e == nil {
+			return fmt.Errorf("element is nil")
+		}
+		// We check core fields for creation
+		if e.Type == "" {
+			return fmt.Errorf("element type is required")
+		}
+		if e.PageID == "" {
+			return fmt.Errorf("pageId is required")
+		}
+		var savedParent *string
+		if e.ParentID != nil {
+			// Treat an empty string or the special 'root' identifier as 'no parent'
+			// for validation purposes so that clients can reference 'root' without
+			// failing the UUID validation rule.
+			v := strings.TrimSpace(*e.ParentID)
+			if v == "" || v == "root" {
+				savedParent = e.ParentID
+				e.ParentID = nil
+			}
+		}
+		if err := validate.Struct(e); err != nil {
+			// restore before returning
+			if savedParent != nil {
+				e.ParentID = savedParent
+			}
+			return fmt.Errorf("invalid element for add: %w", err)
+		}
+		if savedParent != nil {
+			e.ParentID = savedParent
+		}
+		return nil
 	}
-	// We check core fields for creation
-	if e.Type == "" {
-		return fmt.Errorf("element type is required")
-	}
-	if e.PageID == "" {
-		return fmt.Errorf("pageId is required")
-	}
-	if err := validate.Struct(e); err != nil {
-		return fmt.Errorf("invalid element for add: %w", err)
-	}
-	return nil
-}
 
-// ValidateElementForUpdate validates an Element struct for full updates (legacy/fallback)
 func ValidateElementForUpdate(e *domainEntity.Element) error {
 	if e == nil {
 		return fmt.Errorf("element is nil")

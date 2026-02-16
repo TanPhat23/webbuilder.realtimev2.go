@@ -26,16 +26,27 @@ type Handler struct {
 	cancel   context.CancelFunc
 	sendBuf  int
 	logger   logger.Logger
+
+	// activeConns tracks the currently active client per user+project so that
+	// duplicate connections (e.g. rapid reconnects) can be cleaned up.
+	activeConnsMu sync.Mutex
+	activeConns   map[string]*wsentity.Client
+}
+
+// connKey returns a unique key for tracking a user's active connection to a project.
+func connKey(projectID, userID string) string {
+	return projectID + "::" + userID
 }
 
 func NewHandler(uc *domainUsecase.UseCase, rdb *redis.Client, lg logger.Logger) *Handler {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Handler{
-		uc:      uc,
-		ctx:     ctx,
-		cancel:  cancel,
-		sendBuf: 64,
-		logger:  lg,
+		uc:          uc,
+		ctx:         ctx,
+		cancel:      cancel,
+		sendBuf:     64,
+		logger:      lg,
+		activeConns: make(map[string]*wsentity.Client),
 	}
 	h.hub = wsentity.NewHub(h.ctx, &h.wg, h.sendBuf, rdb, lg)
 	h.registerHandlers()
@@ -82,18 +93,28 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 		return
 	}
 
-	ctx := context.Background()
-
-	projElements, _ := h.uc.Element.GetElementsByProjectID(ctx, client.ProjectID)
-	projWorkflows, _ := h.uc.Workflow.GetWorkflowsByProject(ctx, client.ProjectID)
-	projElementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByProject(ctx, client.ProjectID)
-	syncProjMsg, _ := client.Factory().SyncProject(projElements, projWorkflows, projElementWorkflows, nil)
-	if err := client.Send(syncProjMsg); err != nil {
-		h.logger.Errorf("failed to send initial project sync to client: %v", err)
+	ck := connKey(projectID, user.ID)
+	h.activeConnsMu.Lock()
+	if old, exists := h.activeConns[ck]; exists {
+		h.logger.Infof("Closing stale connection for user=%s project=%s", user.ID, projectID)
+		_ = h.hub.Unregister(h.ctx, old)
+		old.Close()
 	}
+	h.activeConns[ck] = client
+	h.activeConnsMu.Unlock()
+
+	ctx := context.Background()
 
 	defer func() {
 		_ = h.hub.Unregister(h.ctx, client)
+
+		h.activeConnsMu.Lock()
+		if h.activeConns[ck] == client {
+			delete(h.activeConns, ck)
+		}
+		h.activeConnsMu.Unlock()
+
+		client.Close()
 	}()
 
 	for {
@@ -104,6 +125,8 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 			}
 			break
 		}
+		h.logger.Infof("Received message: type=%s from userID=%s", msg.Type, user.ID)
+		h.logger.Debugf("Message details: %+v", msg)
 
 		if err := h.processMessage(ctx, client, msg); err != nil {
 			h.logger.Errorf("Error processing message %s: %v", msg.Type, err)
@@ -116,8 +139,8 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 			}
 
 			errMsg := client.Factory().Error(errCode, err.Error())
-			if err := client.Send(errMsg); err != nil {
-				h.logger.Errorf("failed to send error to client: %v", err)
+			if sendErr := client.Send(errMsg); sendErr != nil {
+				h.logger.Errorf("failed to send error to client: %v", sendErr)
 			}
 		}
 	}

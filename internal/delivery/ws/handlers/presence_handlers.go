@@ -38,8 +38,14 @@ func (h *Handler) handleJoin(ctx context.Context, client *wsentity.Client, msg d
 	projWorkflows, _ := h.uc.Workflow.GetWorkflowsByProject(ctx, client.ProjectID)
 	projElementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByProject(ctx, client.ProjectID)
 
+	// Send project sync only to the joining client — NOT broadcast to all rooms.
+	// Broadcasting sync:project to every room on every join creates a message storm
+	// during rapid reconnects (each reconnect triggers a full project sync to ALL
+	// other clients across ALL pages). The joining client needs the project state;
+	// other clients already have it and will receive granular updates via element/workflow
+	// operation broadcasts.
 	syncProjMsg, _ := client.Factory().SyncProject(projElements, projWorkflows, projElementWorkflows, nil)
-	h.hub.BroadcastProject(client.ProjectID, syncProjMsg, client)
+	_ = client.Send(syncProjMsg)
 
 	return nil
 }
@@ -57,6 +63,10 @@ func (h *Handler) handlePresence(ctx context.Context, client *wsentity.Client, m
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
+
+	// Store the client's latest presence locally so sync responses reflect it,
+	// then broadcast the presence to other clients.
+	client.SetPresence(payload)
 
 	broadcastMsg, _ := client.Factory().BroadcastPresence(payload)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)

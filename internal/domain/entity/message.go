@@ -37,7 +37,7 @@ const (
 	TypeElementWorkflowDelete MessageType = "element-workflow:delete"
 
 	// Synchronization
-	TypeSync        MessageType = "sync"         // Initial state request/response
+	TypeSync        MessageType = "sync:page"         // Initial state request/response
 	TypeSyncProject MessageType = "sync:project" // Project-wide sync
 	TypeSnapshot    MessageType = "snapshot"     // Save/Load full state
 	TypeError       MessageType = "error"        // Server-side error reporting
@@ -146,12 +146,24 @@ type PayloadError struct {
 	Message string `json:"message"`
 }
 
-// UserPresence is a lightweight view of an active collaborator
+// Presence represents cursor/selection state for a user in a sync message.
+type Presence struct {
+	CursorX   float64 `json:"cursorX"`
+	CursorY   float64 `json:"cursorY"`
+	ElementID *string `json:"elementId,omitempty"`
+}
+
+// UserPresence represents a synchronized user for `sync:page` payloads.
+// Matches the client-side SyncUser interface shape:
+// {
+//   userId: string;
+//   userName: string;
+//   presence: { cursorX:number, cursorY:number, elementId?: string | null }
+// }
 type UserPresence struct {
-	ID       string    `json:"id"`
-	Name     string    `json:"name"`
-	LastSeen time.Time `json:"lastSeen"`
-	ActiveOn string    `json:"activeOn"` // ElementID being edited
+	UserID   string   `json:"userId"`
+	UserName string   `json:"userName"`
+	Presence Presence `json:"presence"`
 }
 
 // NewMessage helper to construct a standard response

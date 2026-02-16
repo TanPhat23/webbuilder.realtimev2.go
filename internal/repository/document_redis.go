@@ -77,7 +77,15 @@ func (r *documentRepository) DeleteDocument(ctx context.Context, projectID strin
 
 func (r *documentRepository) MarkPageDirty(ctx context.Context, projectID string, pageID string) error {
 	val := fmt.Sprintf("%s:%s", projectID, pageID)
-	return r.client.SAdd(ctx, dirtyPageKey, val).Err()
+	added, err := r.client.SAdd(ctx, dirtyPageKey, val).Result()
+	if err != nil {
+		// Debug log for troubleshooting SAdd failures.
+		fmt.Printf("[DEBUG] documentRepository.MarkPageDirty: SAdd failed key=%s member=%s err=%v\n", dirtyPageKey, val, err)
+		return err
+	}
+	// Debug log showing SAdd result (0 = already present, >0 = new member added)
+	fmt.Printf("[DEBUG] documentRepository.MarkPageDirty: SAdd key=%s member=%s added=%d\n", dirtyPageKey, val, added)
+	return nil
 }
 
 func (r *documentRepository) PopDirtyPages(ctx context.Context, limit int) ([]domainEntity.DirtyPage, error) {

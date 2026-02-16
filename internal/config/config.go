@@ -13,6 +13,7 @@ type Config struct {
 	Database   DatabaseConfig
 	Redis      RedisConfig
 	DevMode    bool
+	ClerkSecretKey string
 }
 
 // DatabaseConfig holds PostgreSQL configuration
@@ -59,6 +60,7 @@ func LoadConfig() (*Config, error) {
 			DB:       getEnvAsInt("REDIS_DB", 0),
 		},
 		DevMode: getEnvAsBool("DEV_MODE", false),
+		ClerkSecretKey: getEnv("CLERK_SECRET_KEY", ""),
 	}, nil
 }
 

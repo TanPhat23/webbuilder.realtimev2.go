@@ -107,3 +107,78 @@ func BuildElementTree(elements []entity.Element) []entity.Element {
 	}
 	return result
 }
+
+func UpdateElement(root *entity.Element, updated entity.Element) bool {
+	if root == nil {
+		return false
+	}
+	if root.ID == updated.ID {
+		*root = updated
+		return true
+	}
+	for i := range root.Elements {
+		if UpdateElement(&root.Elements[i], updated) {
+			return true
+		}
+	}
+	return false
+}
+
+func DeleteElement(root *entity.Element, id string) bool {
+	if root == nil {
+		return false
+	}
+	for i := 0; i < len(root.Elements); i++ {
+		if root.Elements[i].ID == id {
+			root.Elements = append(root.Elements[:i], root.Elements[i+1:]...)
+			return true
+		}
+	}
+	for i := range root.Elements {
+		if DeleteElement(&root.Elements[i], id) {
+			return true
+		}
+	}
+	return false
+}
+
+func SwapElements(root *entity.Element, id1, id2 string) bool {
+	if root == nil {
+		return false
+	}
+	var idx1, idx2 = -1, -1
+	for i := range root.Elements {
+		if root.Elements[i].ID == id1 {
+			idx1 = i
+		} else if root.Elements[i].ID == id2 {
+			idx2 = i
+		}
+	}
+	if idx1 != -1 && idx2 != -1 {
+		root.Elements[idx1], root.Elements[idx2] = root.Elements[idx2], root.Elements[idx1]
+		return true
+	}
+
+	for i := range root.Elements {
+		if SwapElements(&root.Elements[i], id1, id2) {
+			return true
+		}
+	}
+	return false
+}
+
+func CreateElement(root *entity.Element, newElement entity.Element) bool {
+	if root == nil {
+		return false
+	}
+	if (newElement.ParentID == nil && root.ID == "") || (newElement.ParentID != nil && *newElement.ParentID == root.ID) {
+		root.Elements = append(root.Elements, newElement)
+		return true
+	}
+	for i := range root.Elements {
+		if CreateElement(&root.Elements[i], newElement) {
+			return true
+		}
+	}
+	return false
+}

@@ -44,8 +44,16 @@ func (uc *documentUseCase) GetDocument(ctx context.Context, projectID string, pa
 
 	return tree, nil
 }
-
 func (uc *documentUseCase) RefreshCache(ctx context.Context, projectID string, pageID string) error {
+	cachedElements, err := uc.repo.DocumentRepo.GetDocument(ctx, projectID, pageID)
+	if err != nil {
+		return fmt.Errorf("failed to check cache during refresh: %w", err)
+	}
+	if cachedElements != nil {
+		return nil
+	}
+
+	// Cache miss — populate from the database.
 	elements, err := uc.repo.ElementRepo.GetElementsByPageID(ctx, projectID, pageID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch elements for cache refresh: %w", err)

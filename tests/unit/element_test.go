@@ -280,3 +280,89 @@ func TestBuildElementTree_SortsRootsByOrderAndTieBreakers(t *testing.T) {
 		t.Fatalf("unexpected root order/ids: got %v, want %v", ids, expected)
 	}
 }
+
+func TestUpdateElement_ReplacesNested(t *testing.T) {
+	root := makeEl("root",
+		makeEl("child", makeEl("grand")),
+	)
+
+	updated := entity.Element{ID: "grand", Type: "updated"}
+
+	ok := element.UpdateElement(&root, updated)
+	if !ok {
+		t.Fatalf("expected UpdateElement to return true")
+	}
+
+	el := findElementByID([]entity.Element{root}, "grand")
+	if el == nil || el.Type != "updated" {
+		t.Fatalf("expected grandchild to be updated; got %#v", el)
+	}
+}
+
+func TestDeleteElement_DeletesNested(t *testing.T) {
+	root := makeEl("root",
+		makeEl("child", makeEl("grand")),
+	)
+
+	if !element.DeleteElement(&root, "grand") {
+		t.Fatalf("expected DeleteElement to return true")
+	}
+
+	if findElementByID([]entity.Element{root}, "grand") != nil {
+		t.Fatalf("expected grandchild to be deleted")
+	}
+
+	child := findElementByID([]entity.Element{root}, "child")
+	if child == nil {
+		t.Fatalf("expected child to remain")
+	}
+	if len(child.Elements) != 0 {
+		t.Fatalf("expected child to have 0 children after deletion; got %d", len(child.Elements))
+	}
+}
+
+func TestDeleteElement_DeletesImmediateChild(t *testing.T) {
+	root := makeEl("root", makeEl("child"))
+
+	ok := element.DeleteElement(&root, "child")
+	if !ok {
+		t.Fatalf("expected DeleteElement to return true")
+	}
+	if len(root.Elements) != 0 {
+		t.Fatalf("expected child to be removed; got %v", idsFromElements(root.Elements))
+	}
+}
+
+func TestSwapElements_SwapsImmediateChildren(t *testing.T) {
+	root := makeEl("root", makeEl("a"), makeEl("b"), makeEl("c"))
+
+	ok := element.SwapElements(&root, "a", "c")
+	if !ok {
+		t.Fatalf("expected SwapElements to return true")
+	}
+
+	ids := idsFromElements(root.Elements)
+	expected := []string{"c", "b", "a"}
+	if !reflect.DeepEqual(ids, expected) {
+		t.Fatalf("unexpected order: got %v, want %v", ids, expected)
+	}
+}
+
+func TestSwapElements_SwapsNestedChildren(t *testing.T) {
+	root := makeEl("root", makeEl("parent", makeEl("a"), makeEl("b"), makeEl("x")))
+
+	ok := element.SwapElements(&root, "a", "b")
+	if !ok {
+		t.Fatalf("expected SwapElements to return true")
+	}
+
+	p := findElementByID([]entity.Element{root}, "parent")
+	if p == nil {
+		t.Fatalf("expected parent to exist")
+	}
+	ids := idsFromElements(p.Elements)
+	expected := []string{"b", "a", "x"}
+	if !reflect.DeepEqual(ids, expected) {
+		t.Fatalf("unexpected nested order: got %v want %v", ids, expected)
+	}
+}

@@ -119,9 +119,11 @@ func (uc *PersistenceUseCase) Flush(ctx context.Context) error {
 }
 
 func (uc *PersistenceUseCase) MarkDirty(ctx context.Context, projectID, pageID string) error {
+	uc.logger.Debugf("MarkDirty called for project=%s page=%s", projectID, pageID)
 	if err := uc.repo.DocumentRepo.MarkPageDirty(ctx, projectID, pageID); err != nil {
 		uc.logger.Errorf("failed to mark page dirty: %v", err)
 		return err
 	}
+	uc.logger.Debugf("MarkDirty succeeded for project=%s page=%s", projectID, pageID)
 	return nil
 }

@@ -32,12 +32,31 @@ func (r *elementRepository) CreateElement(ctx context.Context, projectID string,
 
 // Create Elements from a flattened elements array
 func (r *elementRepository) CreateElements(ctx context.Context, projectID string, pageId string, elements []domainEntity.Element) error {
-	for _, element := range elements {
-		element.PageID = pageId
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return fmt.Errorf("failed to start transaction: %w", tx.Error)
 	}
-	if err := r.db.WithContext(ctx).CreateInBatches(elements, len(elements)).Error; err != nil {
-		return err
+
+	if err := tx.Where(`"PageId" = ?`, pageId).Delete(&domainEntity.Element{}).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to clear elements for page %s: %w", pageId, err)
 	}
+
+	for i := range elements {
+		elements[i].PageID = pageId
+	}
+
+	if len(elements) > 0 {
+		if err := tx.CreateInBatches(elements, len(elements)).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return fmt.Errorf("failed to commit elements replace: %w", err)
+	}
+
 	return nil
 }
 

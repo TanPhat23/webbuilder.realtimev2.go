@@ -58,7 +58,7 @@ func (r *Room) run() {
 		r.mu.Lock()
 		for client := range r.clients {
 			delete(r.clients, client)
-			close(client.send)
+			client.CloseSend()
 		}
 		r.mu.Unlock()
 	}()
@@ -90,7 +90,7 @@ func (r *Room) run() {
 			r.mu.Lock()
 			if _, ok := r.clients[client]; ok {
 				delete(r.clients, client)
-				close(client.send)
+				client.CloseSend()
 			}
 			empty := len(r.clients) == 0
 			r.mu.Unlock()
@@ -117,7 +117,7 @@ func (r *Room) run() {
 				case client.send <- msg.message:
 				default:
 					// slow client: remove and close its send channel
-					close(client.send)
+					client.CloseSend()
 					delete(r.clients, client)
 				}
 			}
@@ -181,9 +181,11 @@ func (r *Room) GetParticipants() []domainEntity.UserPresence {
 				name = client.User.Email
 			}
 
+			pres := client.GetPresence()
 			users = append(users, domainEntity.UserPresence{
-				ID:   client.User.ID,
-				Name: name,
+				UserID:   client.User.ID,
+				UserName: name,
+				Presence: pres,
 			})
 		}
 	}

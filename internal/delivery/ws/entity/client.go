@@ -17,6 +17,13 @@ type Client struct {
 	User      *domainEntity.User
 	send      chan domainEntity.Message
 	closeOnce sync.Once
+
+	// Presence state: stores the latest cursor/selection information for the client.
+	// Protected by PresenceMu when accessed concurrently.
+	PresenceMu sync.Mutex
+	CursorX    float64
+	CursorY    float64
+	ElementID  *string
 }
 
 // NewClient constructs a new client for the given connection, project, and user.
@@ -28,8 +35,8 @@ func NewClient(conn *websocket.Conn, projectID string, user *domainEntity.User) 
 	}
 }
 
-// closeSend closes the client's send channel exactly once.
-func (c *Client) closeSend() {
+// CloseSend closes the client's send channel exactly once.
+func (c *Client) CloseSend() {
 	c.closeOnce.Do(func() {
 		if c.send != nil {
 			close(c.send)
@@ -79,16 +86,36 @@ func (c *Client) RoomID() string {
 
 // Close gracefully closes the client connection and channel.
 func (c *Client) Close() {
-	c.closeSend()
+	c.CloseSend()
 	_ = c.Conn.Close()
 }
 
-// Factory returns a MessageFactory initialized with the client's context.
-// If the client has an associated user, the user's ID will be passed so
-// created messages automatically populate the envelope's userId field.
-func (c *Client) Factory() *MessageFactory {
-	if c.User != nil && c.User.ID != "" {
-		return NewMessageFactory(c.ProjectID, c.PageID, c.User.ID)
+	func (c *Client) Factory() *MessageFactory {
+		if c.User != nil && c.User.ID != "" {
+			return NewMessageFactory(c.ProjectID, c.PageID, c.User.ID)
+		}
+		return NewMessageFactory(c.ProjectID, c.PageID)
 	}
-	return NewMessageFactory(c.ProjectID, c.PageID)
-}
+
+	func (c *Client) SetPresence(p domainEntity.PayloadPresence) {
+		c.PresenceMu.Lock()
+		defer c.PresenceMu.Unlock()
+		c.CursorX = p.CursorX
+		c.CursorY = p.CursorY
+		if p.ElementID == "" {
+			c.ElementID = nil
+		} else {
+			e := p.ElementID
+			c.ElementID = &e
+		}
+	}
+
+	func (c *Client) GetPresence() domainEntity.Presence {
+		c.PresenceMu.Lock()
+		defer c.PresenceMu.Unlock()
+		return domainEntity.Presence{
+			CursorX:   c.CursorX,
+			CursorY:   c.CursorY,
+			ElementID: c.ElementID,
+		}
+	}

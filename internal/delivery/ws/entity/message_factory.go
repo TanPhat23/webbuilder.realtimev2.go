@@ -34,6 +34,7 @@ func NewMessageFactory(projectID, pageID string, userID ...string) *MessageFacto
 
 // CreateElement constructs a message for new element additions.
 func (f *MessageFactory) CreateElement(element domainEntity.Element) (domainEntity.Message, error) {
+	element = sanitizeElements([]domainEntity.Element{element})[0]
 	return f.Create(domainEntity.TypeElementCreate, domainEntity.PayloadElementCreate{
 		Element: element,
 	})
@@ -58,12 +59,57 @@ func (f *MessageFactory) MoveElement(payload domainEntity.PayloadElementMove) (d
 
 // SyncPage constructs a synchronization message with the full page state.
 // Workflows (project-level) are intentionally excluded from page-level syncs.
+//
+// Sanitizes elements prior to creating the message so all required properties
+// are present for the frontend (prevents missing properties from causing UI hangs).
 func (f *MessageFactory) SyncPage(elements []domainEntity.Element, elementWorkflows []domainEntity.ElementEventWorkflow, users []domainEntity.UserPresence) (domainEntity.Message, error) {
+	sanitized := sanitizeElements(elements)
 	return f.Create(domainEntity.TypeSync, domainEntity.PayloadSync{
-		Elements:         elements,
+		Elements:         sanitized,
 		ElementWorkflows: elementWorkflows,
 		Users:            users,
 	})
+}
+
+// sanitizeElements ensures element objects contain safe default properties
+// (e.g., non-nil pointers and empty maps) so that JSON payloads always include
+// the expected fields and the frontend doesn't attempt to access missing values.
+func sanitizeElements(elements []domainEntity.Element) []domainEntity.Element {
+	out := make([]domainEntity.Element, 0, len(elements))
+	for _, el := range elements {
+		e := el // copy to avoid mutating original
+
+		// Ensure pointer/string fields exist (so `omitempty` won't drop them)
+		if e.Name == nil {
+			empty := ""
+			e.Name = &empty
+		}
+		if e.Content == nil {
+			empty := ""
+			e.Content = &empty
+		}
+		if e.Href == nil {
+			empty := ""
+			e.Href = &empty
+		}
+		if e.Src == nil {
+			empty := ""
+			e.Src = &empty
+		}
+		if e.TailwindStyles == nil {
+			empty := ""
+			e.TailwindStyles = &empty
+		}
+
+		if e.Styles == nil {
+			e.Styles = map[string]any{}
+		}
+
+		e.Elements = sanitizeElements(e.Elements)
+
+		out = append(out, e)
+	}
+	return out
 }
 
 func (f *MessageFactory) SyncProject(elements []domainEntity.Element, workflows []domainEntity.EventWorkflow, elementWorkflows []domainEntity.ElementEventWorkflow, users []domainEntity.UserPresence) (domainEntity.Message, error) {

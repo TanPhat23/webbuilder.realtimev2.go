@@ -142,6 +142,66 @@ func TestDecodePayload(t *testing.T) {
 	}
 }
 
+func TestMessageFactory_SyncPage_SerializesUserPresence(t *testing.T) {
+	f := wsentity.NewMessageFactory("p1", "pg1")
+
+	// Prepare two user presences (one without elementId, one with elementId)
+	elem := "elem-42"
+	users := []domainEntity.UserPresence{
+		{
+			UserID:   "user-1",
+			UserName: "Tester",
+			Presence: domainEntity.Presence{
+				CursorX:   0.12,
+				CursorY:   0.34,
+				ElementID: nil,
+			},
+		},
+		{
+			UserID:   "user-2",
+			UserName: "Bob",
+			Presence: domainEntity.Presence{
+				CursorX:   0.56,
+				CursorY:   0.78,
+				ElementID: &elem,
+			},
+		},
+	}
+
+	msg, err := f.SyncPage(nil, nil, users)
+	if err != nil {
+		t.Fatalf("SyncPage failed: %v", err)
+	}
+
+	var payload domainEntity.PayloadSync
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		t.Fatalf("failed to unmarshal payload: %v", err)
+	}
+
+	if len(payload.Users) != 2 {
+		t.Fatalf("expected 2 users, got %d", len(payload.Users))
+	}
+
+	u0 := payload.Users[0]
+	if u0.UserID != "user-1" || u0.UserName != "Tester" {
+		t.Fatalf("unexpected user0: %+v", u0)
+	}
+	if u0.Presence.CursorX != 0.12 || u0.Presence.CursorY != 0.34 || u0.Presence.ElementID != nil {
+		t.Fatalf("unexpected presence for user0: %+v", u0.Presence)
+	}
+
+	u1 := payload.Users[1]
+	if u1.UserID != "user-2" || u1.UserName != "Bob" {
+		t.Fatalf("unexpected user1: %+v", u1)
+	}
+	if u1.Presence.CursorX != 0.56 || u1.Presence.CursorY != 0.78 {
+		t.Fatalf("unexpected presence coords for user1: %+v", u1.Presence)
+	}
+	if u1.Presence.ElementID == nil || *u1.Presence.ElementID != "elem-42" {
+		t.Fatalf("unexpected presence elementId for user1: %+v", u1.Presence)
+	}
+}
+
 func TestHub_Basic(t *testing.T) {
 	ctx := context.Background()
 	wg := &sync.WaitGroup{}
@@ -195,4 +255,69 @@ func TestRoom_Initialization(t *testing.T) {
 			t.Errorf("expected 0 participants, got %d", len(users))
 		}
 	})
+}
+
+func TestMessageFactory_SyncPage_SanitizesElements(t *testing.T) {
+	f := wsentity.NewMessageFactory("p1", "pg1")
+
+	elements := []domainEntity.Element{
+		{
+			ID:       "el-1",
+			Type:     "text",
+			Order:    0,
+			IsLocked: false,
+			PageID:   "pg1",
+		},
+		{
+			ID:       "el-2",
+			Type:     "container",
+			Order:    1,
+			IsLocked: false,
+			PageID:   "pg1",
+			Elements: []domainEntity.Element{
+				{
+					ID:       "el-2-1",
+					Type:     "text",
+					Order:    0,
+					IsLocked: false,
+					PageID:   "pg1",
+				},
+			},
+		},
+	}
+
+	msg, err := f.SyncPage(elements, nil, nil)
+	if err != nil {
+		t.Fatalf("SyncPage failed: %v", err)
+	}
+
+	var payload domainEntity.PayloadSync
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		t.Fatalf("failed to unmarshal sync payload: %v", err)
+	}
+
+	if len(payload.Elements) != 2 {
+		t.Fatalf("expected 2 elements, got %d", len(payload.Elements))
+	}
+
+	// Top-level element should have content and styles set (non-nil)
+	el := payload.Elements[0]
+	if el.Content == nil {
+		t.Errorf("expected element content to be set (non-nil), got nil")
+	}
+	if el.Styles == nil {
+		t.Errorf("expected element styles to be set (non-nil), got nil")
+	}
+
+	// Nested child should also be sanitized
+	if len(payload.Elements[1].Elements) != 1 {
+		t.Fatalf("expected 1 child element, got %d", len(payload.Elements[1].Elements))
+	}
+	child := payload.Elements[1].Elements[0]
+	if child.Content == nil {
+		t.Errorf("expected child content to be set (non-nil), got nil")
+	}
+	if child.Styles == nil {
+		t.Errorf("expected child styles to be set (non-nil), got nil")
+	}
 }

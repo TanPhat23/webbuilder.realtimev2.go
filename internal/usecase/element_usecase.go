@@ -55,7 +55,7 @@ func (uc *elementUseCase) GetElementsByProjectID(ctx context.Context, projectID 
 	return elementutils.BuildElementTree(flattenElements), nil
 }
 
-func (uc *elementUseCase) AddElement(ctx context.Context, projectID string, element *domainEntity.Element) error {
+func (uc *elementUseCase) CreateElement(ctx context.Context, projectID string, element *domainEntity.Element) error {
 	if err := validation.ValidateElementForAdd(element); err != nil {
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
@@ -64,13 +64,37 @@ func (uc *elementUseCase) AddElement(ctx context.Context, projectID string, elem
 		element.ID = uuid.NewString()
 	}
 
-	// Fetch current document tree from cache
 	elements, err := uc.docUseCase.GetDocument(ctx, projectID, element.PageID)
 	if err != nil {
 		return err
 	}
 
-	elements = append(elements, *element)
+	if element.ParentID != nil && *element.ParentID != "" {
+		inserted := false
+		for i := range elements {
+			if elementutils.CreateElement(&elements[i], *element) {
+				inserted = true
+				break
+			}
+		}
+		if !inserted {
+			// If the requested parent is the special 'root' id, create a root
+			// parent element and append the new element under it. This keeps
+			// behavior compatible with clients that address the top-level using
+			// the 'root' identifier. Otherwise return not found.
+			if *element.ParentID == "root" {
+				root := domainEntity.Element{
+					ID:       "root",
+					Elements: []domainEntity.Element{*element},
+				}
+				elements = append(elements, root)
+			} else {
+				return domainErrors.New(domainErrors.CodeNotFound, "parent not found", nil)
+			}
+		}
+	} else {
+		elements = append(elements, *element)
+	}
 
 	// Write-Back Strategy: Update Cache, then Mark Dirty
 	if err := uc.docUseCase.AddElementsToDocument(ctx, projectID, element.PageID, elements); err != nil {
@@ -90,12 +114,9 @@ func (uc *elementUseCase) UpdateElement(ctx context.Context, projectID string, p
 		return err
 	}
 
-	// Flatten for easier lookup and update
-	flat := elementutils.FlattenElements(elements)
 	found := false
-	for i := range flat {
-		if flat[i].ID == element.ID {
-			flat[i] = *element
+	for i := range elements {
+		if elementutils.UpdateElement(&elements[i], *element) {
 			found = true
 			break
 		}
@@ -105,9 +126,7 @@ func (uc *elementUseCase) UpdateElement(ctx context.Context, projectID string, p
 		return domainErrors.New(domainErrors.CodeNotFound, "element not found in cache", nil)
 	}
 
-	// Re-build tree and save to cache
-	newTree := elementutils.BuildElementTree(flat)
-	if err := uc.docUseCase.AddElementsToDocument(ctx, projectID, pageID, newTree); err != nil {
+	if err := uc.docUseCase.AddElementsToDocument(ctx, projectID, pageID, elements); err != nil {
 		return err
 	}
 
@@ -180,7 +199,6 @@ func (uc *elementUseCase) MoveElement(ctx context.Context, projectID string, pag
 		return nil, domainErrors.New(domainErrors.CodeNotFound, "element not found", nil)
 	}
 
-	// Use existing logic for calculating reordering
 	updatedFlat := uc.calculateMoveReordering(target, flat, parentID, index)
 
 	newTree := elementutils.BuildElementTree(updatedFlat)
@@ -192,7 +210,6 @@ func (uc *elementUseCase) MoveElement(ctx context.Context, projectID string, pag
 		return nil, err
 	}
 
-	// Find the updated element in the new flat list to return
 	for _, e := range updatedFlat {
 		if e.ID == elementID {
 			return &e, nil
@@ -208,18 +225,27 @@ func (uc *elementUseCase) RemoveElement(ctx context.Context, projectID string, p
 		return err
 	}
 
-	flat := elementutils.FlattenElements(elements)
-	newFlat := make([]domainEntity.Element, 0, len(flat))
-
-	// Simple removal from flat list.
-	for _, e := range flat {
-		if e.ID != elementID {
-			newFlat = append(newFlat, e)
+	removed := false
+	newRoots := make([]domainEntity.Element, 0, len(elements))
+	for _, r := range elements {
+		if r.ID == elementID {
+			removed = true
+			continue
+		}
+		newRoots = append(newRoots, r)
+	}
+	if removed {
+		elements = newRoots
+	} else {
+		for i := range elements {
+			if elementutils.DeleteElement(&elements[i], elementID) {
+				removed = true
+				break
+			}
 		}
 	}
 
-	newTree := elementutils.BuildElementTree(newFlat)
-	if err := uc.docUseCase.AddElementsToDocument(ctx, projectID, pageID, newTree); err != nil {
+	if err := uc.docUseCase.AddElementsToDocument(ctx, projectID, pageID, elements); err != nil {
 		return err
 	}
 

@@ -1,9 +1,11 @@
 package logger
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"os"
+	"strings"
 )
 
 // Logger provides a minimal logging interface for injection and testing.
@@ -35,34 +37,46 @@ func Default() *MyLogger {
 
 var DefaultLogger Logger = Default()
 
+const callerDepth = 4
+
+func (l *MyLogger) output(msg string) {
+	_ = l.l.Output(callerDepth, msg)
+}
+
+func formatArgs(args ...any) string {
+	return strings.TrimRight(fmt.Sprintln(args...), "\n")
+}
+
 func (l *MyLogger) Info(args ...any) {
-	l.l.Println(append([]any{"[INFO]"}, args...)...)
+	l.output("[INFO] " + formatArgs(args...))
 }
 
 func (l *MyLogger) Infof(format string, args ...any) {
-	l.l.Printf("[INFO] "+format+"\n", args...)
+	l.output("[INFO] " + fmt.Sprintf(format, args...))
 }
 
 func (l *MyLogger) Error(args ...any) {
-	l.l.Println(append([]any{"[ERROR]"}, args...)...)
+	l.output("[ERROR] " + formatArgs(args...))
 }
 
 func (l *MyLogger) Errorf(format string, args ...any) {
-	l.l.Printf("[ERROR] "+format+"\n", args...)
+	l.output("[ERROR] " + fmt.Sprintf(format, args...))
 }
 
 func (l *MyLogger) Debug(args ...any) {
-	l.l.Println(append([]any{"[DEBUG]"}, args...)...)
+	l.output("[DEBUG] " + formatArgs(args...))
 }
 
 func (l *MyLogger) Debugf(format string, args ...any) {
-	l.l.Printf("[DEBUG] "+format+"\n", args...)
+	l.output("[DEBUG] " + fmt.Sprintf(format, args...))
 }
 
 func (l *MyLogger) Fatal(args ...any) {
-	l.l.Fatal(append([]any{"[FATAL]"}, args...)...)
+	l.output("[FATAL] " + formatArgs(args...))
+	os.Exit(1)
 }
 
 func (l *MyLogger) Fatalf(format string, args ...any) {
-	l.l.Fatalf("[FATAL] "+format, args...)
+	l.output("[FATAL] " + fmt.Sprintf(format, args...))
+	os.Exit(1)
 }

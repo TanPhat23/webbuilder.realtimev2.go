@@ -11,8 +11,6 @@ import (
 )
 
 func (h *Handler) handleElementCreate(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
-	h.logger.Debug("handleElementCreate called")
-	h.logger.Debugf("%v", msg)
 	var payload domainEntity.PayloadElementCreate
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
@@ -26,7 +24,7 @@ func (h *Handler) handleElementCreate(ctx context.Context, client *wsentity.Clie
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
 
-	if err := h.uc.Element.AddElement(ctx, client.ProjectID, &payload.Element); err != nil {
+	if err := h.uc.Element.CreateElement(ctx, client.ProjectID, &payload.Element); err != nil {
 		return err
 	}
 
