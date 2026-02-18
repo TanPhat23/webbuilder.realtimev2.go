@@ -172,6 +172,7 @@ func CreateElement(root *entity.Element, newElement entity.Element) bool {
 		return false
 	}
 	if (newElement.ParentID == nil && root.ID == "") || (newElement.ParentID != nil && *newElement.ParentID == root.ID) {
+		newElement.Order = len(root.Elements)
 		root.Elements = append(root.Elements, newElement)
 		return true
 	}

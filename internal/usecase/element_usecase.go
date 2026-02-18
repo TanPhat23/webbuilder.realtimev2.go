@@ -78,10 +78,6 @@ func (uc *elementUseCase) CreateElement(ctx context.Context, projectID string, e
 			}
 		}
 		if !inserted {
-			// If the requested parent is the special 'root' id, create a root
-			// parent element and append the new element under it. This keeps
-			// behavior compatible with clients that address the top-level using
-			// the 'root' identifier. Otherwise return not found.
 			if *element.ParentID == "root" {
 				root := domainEntity.Element{
 					ID:       "root",
@@ -93,6 +89,7 @@ func (uc *elementUseCase) CreateElement(ctx context.Context, projectID string, e
 			}
 		}
 	} else {
+		element.Order = len(elements)
 		elements = append(elements, *element)
 	}
 
