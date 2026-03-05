@@ -3,9 +3,6 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"time"
-
-	"github.com/google/uuid"
 
 	domainEntity "webbuilder/internal/domain/entity"
 	domainErrors "webbuilder/internal/domain/errors"
@@ -13,6 +10,8 @@ import (
 	domainUsecase "webbuilder/internal/domain/usecase"
 	elementutils "webbuilder/internal/utils/element"
 	"webbuilder/internal/utils/validation"
+
+	"github.com/google/uuid"
 )
 
 type elementUseCase struct {
@@ -130,7 +129,7 @@ func (uc *elementUseCase) UpdateElement(ctx context.Context, projectID string, p
 	return uc.persistUseCase.MarkDirty(ctx, projectID, pageID)
 }
 
-func (uc *elementUseCase) PatchElement(ctx context.Context, projectID string, pageID string, elementID string, properties map[string]any, styles map[string]any, settings *domainEntity.Setting) error {
+func (uc *elementUseCase) PatchElement(ctx context.Context, projectID string, pageID string, elementID string, properties map[string]any, styles map[string]any, settings map[string]any) error {
 	elements, err := uc.docUseCase.GetDocument(ctx, projectID, pageID)
 	if err != nil {
 		return err
@@ -140,25 +139,14 @@ func (uc *elementUseCase) PatchElement(ctx context.Context, projectID string, pa
 	found := false
 	for i := range flat {
 		if flat[i].ID == elementID {
-			if properties != nil && settings == nil {
-				if flat[i].Setting == nil {
-					flat[i].Setting = &domainEntity.Setting{
-						ID:        uuid.NewString(),
-						ElementID: flat[i].ID,
-						Settings:  properties,
-						CreatedAt: time.Now(),
-						UpdatedAt: time.Now(),
-					}
-				} else {
-					flat[i].Setting.Settings = properties
-					flat[i].Setting.UpdatedAt = time.Now()
-				}
+			if properties != nil {
+				flat[i].Settings = properties
 			}
 			if styles != nil {
 				flat[i].Styles = styles
 			}
 			if settings != nil {
-				flat[i].Setting = settings
+				flat[i].Settings = settings
 			}
 			found = true
 			break

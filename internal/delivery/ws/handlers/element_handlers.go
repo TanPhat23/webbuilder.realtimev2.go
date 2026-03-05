@@ -47,7 +47,6 @@ func (h *Handler) handleElementUpdate(ctx context.Context, client *wsentity.Clie
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
 
-	// Use the specific PatchElement logic moved to use case for better scalability/reusability
 	if err := h.uc.Element.PatchElement(ctx, client.ProjectID, client.PageID, payload.ID, payload.Properties, payload.Styles, payload.Settings); err != nil {
 		return err
 	}

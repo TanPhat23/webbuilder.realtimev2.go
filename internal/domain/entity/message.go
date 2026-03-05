@@ -80,7 +80,7 @@ type PayloadElementUpdate struct {
 	ID         string         `json:"id"`
 	Properties map[string]any `json:"properties,omitempty"`
 	Styles     map[string]any `json:"styles,omitempty"`
-	Settings   *Setting       `json:"settings,omitempty"`
+	Settings   map[string]any `json:"settings,omitempty"`
 }
 
 // PayloadElementMove for drag-and-drop reordering

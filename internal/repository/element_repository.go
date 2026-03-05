@@ -128,7 +128,6 @@ func (r *elementRepository) DeleteElement(ctx context.Context, projectID string,
 func (r *elementRepository) GetElementByID(ctx context.Context, projectID string, pageID string, elementID string) (*domainEntity.Element, error) {
 	var elem domainEntity.Element
 	err := r.db.WithContext(ctx).
-		Preload("Setting").
 		Preload("Comments").
 		Preload("Comments.Author").
 		Preload("EventWorkflows").
@@ -153,7 +152,6 @@ func (r *elementRepository) GetElementsByPageID(ctx context.Context, projectID s
 		Joins(`JOIN "Page" ON "Element"."PageId" = "Page"."Id"`).
 		Where(`"Page"."ProjectId" = ? AND "Element"."PageId" = ?`, projectID, pageID).
 		Order(`COALESCE("Element"."ParentId",'') ASC, "Element"."Order" ASC`).
-		Preload("Setting").
 		Preload("Comments").
 		Preload("Comments.Author").
 		Preload("EventWorkflows").
@@ -174,7 +172,6 @@ func (r *elementRepository) GetElementsByProjectID(ctx context.Context, projectI
 		Joins(`JOIN "Page" ON "Element"."PageId" = "Page"."Id"`).
 		Where(`"Page"."ProjectId" = ?`, projectID).
 		Order(`"Page"."Id" ASC, COALESCE("Element"."ParentId",'') ASC, "Element"."Order" ASC`).
-		Preload("Setting").
 		Preload("Comments").
 		Preload("Comments.Author").
 		Preload("EventWorkflows").

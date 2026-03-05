@@ -18,7 +18,7 @@ type ElementUseCase interface {
 	// UpdateElement updates an existing element and refreshes the page cache.
 	UpdateElement(ctx context.Context, projectID string, pageID string, element *entity.Element) error
 	// PatchElement applies granular updates to an element and refreshes the page cache.
-	PatchElement(ctx context.Context, projectID string, pageID string, elementID string, properties map[string]any, styles map[string]any, settings *entity.Setting) error
+	PatchElement(ctx context.Context, projectID string, pageID string, elementID string, properties map[string]any, styles map[string]any, settings map[string]any) error
 	// RemoveElement deletes an element and refreshes the page cache.
 	RemoveElement(ctx context.Context, projectID string, pageID string, elementID string) error
 	// MoveElement moves the element under a new parent at the given index and refreshes the page cache.

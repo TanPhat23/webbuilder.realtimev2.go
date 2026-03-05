@@ -120,10 +120,8 @@ func TestFlattenElements_PreservesProperties(t *testing.T) {
 	root := entity.Element{
 		ID:   "withprops",
 		Type: "button",
-		Setting: &entity.Setting{
-			Settings: map[string]any{
-				"foo": "bar",
-			},
+		Settings: map[string]any{
+			"foo": "bar",
 		},
 		Elements: []entity.Element{
 			{ID: "child"},
@@ -144,8 +142,8 @@ func TestFlattenElements_PreservesProperties(t *testing.T) {
 	if rootGot.Type != "button" {
 		t.Fatalf("expected root type %q, got %q", "button", rootGot.Type)
 	}
-	if rootGot.Setting == nil || rootGot.Setting.Settings["foo"] != "bar" {
-		t.Fatalf("expected setting foo=bar, got %v", rootGot.Setting)
+	if rootGot.Settings == nil || rootGot.Settings["foo"] != "bar" {
+		t.Fatalf("expected setting foo=bar, got %v", rootGot.Settings)
 	}
 }
 

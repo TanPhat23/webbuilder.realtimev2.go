@@ -44,7 +44,7 @@ func main() {
 	// 	&domainEntity.Project{},
 	// 	&domainEntity.Page{},
 	// 	&domainEntity.Element{},
-	// 	&domainEntity.Setting{},
+
 	// 	&domainEntity.Snapshot{},
 	// 	&domainEntity.EventWorkflow{},
 	// 	&domainEntity.ElementEventWorkflow{},
