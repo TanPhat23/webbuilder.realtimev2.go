@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm"
 
 	domainEntity "webbuilder/internal/domain/entity"
@@ -104,6 +105,34 @@ func (r *elementRepository) UpdateElements(ctx context.Context, projectID string
 	if err := tx.Commit().Error; err != nil {
 		return fmt.Errorf("failed to commit updates: %w", err)
 	}
+	return nil
+}
+
+// UpsertElements creates or updates multiple elements within a transaction, scoped by pageID
+func (r *elementRepository) UpsertElements(ctx context.Context, projectID string, pageID string, elements []domainEntity.Element) error {
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return fmt.Errorf("failed to start transaction: %w", tx.Error)
+	}
+
+	for i := range elements {
+		elements[i].PageID = pageID
+	}
+
+	if len(elements) > 0 {
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "Id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"Name", "Type", "Content", "Href", "Src", "Styles", "Settings", "TailwindStyles", "Order", "IsLocked", "ParentId", "PageId"}),
+		}).CreateInBatches(elements, len(elements)).Error; err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to upsert elements: %w", err)
+		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return fmt.Errorf("failed to commit upsert: %w", err)
+	}
+
 	return nil
 }
 

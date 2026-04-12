@@ -11,6 +11,7 @@ type ElementRepository interface {
 	CreateElements(ctx context.Context, projectID string, pageID string, element []entity.Element) error
 	UpdateElement(ctx context.Context, projectID string, pageID string, element *entity.Element) error
 	UpdateElements(ctx context.Context, projectID string, pageID string, elements []entity.Element) error
+	UpsertElements(ctx context.Context, projectID string, pageID string, elements []entity.Element) error
 	DeleteElement(ctx context.Context, projectID string, pageID string, elementID string) error
 	GetElementByID(ctx context.Context, projectID string, pageID string, elementID string) (*entity.Element, error)
 	GetElementsByPageID(ctx context.Context, projectID string, pageID string) ([]entity.Element, error)
@@ -18,9 +19,9 @@ type ElementRepository interface {
 }
 
 type SnapshotRepository interface {
-	SaveSnapshot(ctx context.Context, pageID string, name string, snapshotType entity.SnapshotType, elements []entity.Element) error
-	GetSnapshot(ctx context.Context, pageID string, snapshotType entity.SnapshotType) (*entity.Snapshot, error)
-	DeleteSnapshot(ctx context.Context, pageID string, snapshotType entity.SnapshotType) error
+	SaveSnapshot(ctx context.Context, pageID, projectID, name string, snapshotType entity.SnapshotType, elements []entity.Element) error
+	GetSnapshot(ctx context.Context, pageID, projecID string, snapshotType entity.SnapshotType) (*entity.Snapshot, error)
+	DeleteSnapshot(ctx context.Context, pageID, projectID string, snapshotType entity.SnapshotType) error
 }
 
 type DocumentRepository interface {

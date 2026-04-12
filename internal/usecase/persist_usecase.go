@@ -26,8 +26,8 @@ func NewPersistenceUsecase(repo *domainRepo.Repository, logger logger.Logger) do
 }
 
 type Result struct {
-	projectID, pageID string
-	err               error
+	ProjectID, PageID string
+	Err               error
 }
 
 func (uc *PersistenceUseCase) worker(ctx context.Context, tasks <-chan domainEntity.DirtyPage, results chan<- Result, wg *sync.WaitGroup) {
@@ -36,25 +36,33 @@ func (uc *PersistenceUseCase) worker(ctx context.Context, tasks <-chan domainEnt
 		elementTree, err := uc.repo.DocumentRepo.GetDocument(ctx, dirty.ProjectID, dirty.PageID)
 		if err != nil {
 			results <- Result{
-				projectID: dirty.ProjectID,
-				pageID:    dirty.PageID,
-				err:       err,
+				ProjectID: dirty.ProjectID,
+				PageID:    dirty.PageID,
+				Err:       err,
 			}
 			continue
 		}
 		flattenedEl := elementUtils.FlattenElements(elementTree)
-		if err := uc.repo.ElementRepo.CreateElements(ctx, dirty.ProjectID, dirty.PageID, flattenedEl); err != nil {
+		if err := uc.repo.ElementRepo.UpdateElements(ctx, dirty.ProjectID, dirty.PageID, flattenedEl); err != nil {
 			results <- Result{
-				projectID: dirty.ProjectID,
-				pageID:    dirty.PageID,
-				err:       err,
+				ProjectID: dirty.ProjectID,
+				PageID:    dirty.PageID,
+				Err:       err,
+			}
+			continue
+		}
+		if err := uc.repo.SnapshotRepo.SaveSnapshot(ctx, dirty.ProjectID, dirty.PageID, "autosave", domainEntity.SnapshotTypes.Working, elementTree); err != nil {
+			results <- Result{
+				ProjectID: dirty.ProjectID,
+				PageID:    dirty.PageID,
+				Err:       err,
 			}
 			continue
 		}
 		results <- Result{
-			projectID: dirty.ProjectID,
-			pageID:    dirty.PageID,
-			err:       nil,
+			ProjectID: dirty.ProjectID,
+			PageID:    dirty.PageID,
+			Err:       nil,
 		}
 	}
 }
@@ -110,9 +118,9 @@ func (uc *PersistenceUseCase) Flush(ctx context.Context) error {
 	// Collect results and log errors
 	var lastErr error
 	for result := range results {
-		if result.err != nil {
-			uc.logger.Errorf("Error saving elements to database for pageId %s projectID %s: %v", result.pageID, result.projectID, result.err)
-			lastErr = result.err
+		if result.Err != nil {
+			uc.logger.Errorf("Error saving elements to database for pageId %s projectID %s: %v", result.PageID, result.ProjectID, result.Err)
+			lastErr = result.Err
 		}
 	}
 	return lastErr
