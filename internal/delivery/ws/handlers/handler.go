@@ -26,6 +26,7 @@ type Handler struct {
 	cancel   context.CancelFunc
 	sendBuf  int
 	logger   logger.Logger
+	pages    *pageActors
 
 	// activeConns tracks the currently active client per user+project so that
 	// duplicate connections (e.g. rapid reconnects) can be cleaned up.
@@ -48,6 +49,7 @@ func NewHandler(uc *domainUsecase.UseCase, rdb *redis.Client, lg logger.Logger) 
 		logger:      lg,
 		activeConns: make(map[string]*wsentity.Client),
 	}
+	h.pages = newPageActors(ctx, pageActorIdle)
 	h.hub = wsentity.NewHub(h.ctx, &h.wg, h.sendBuf, rdb, lg)
 	h.registerHandlers()
 	return h
@@ -88,8 +90,8 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 
 	if projectID == "" {
 		errMsg := client.Factory().Error(domainErrors.CodeValidation, "project ID is required")
-		_ = client.Conn.WriteJSON(errMsg)
-		client.Close()
+		_ = client.WriteJSON(errMsg)
+		client.Release()
 		return
 	}
 
@@ -114,7 +116,8 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 		}
 		h.activeConnsMu.Unlock()
 
-		client.Close()
+		// Must be last: fences off the writer goroutine before the library recycles the conn.
+		client.Release()
 	}()
 
 	for {
@@ -138,7 +141,8 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 				errCode = appErr.Code
 			}
 
-			errMsg := client.Factory().Error(errCode, err.Error())
+			errMsg := client.Factory().ErrorForOp(errCode, err.Error(), msg.ClientOpID)
+			errMsg.RequestID = msg.RequestID
 			if sendErr := client.Send(errMsg); sendErr != nil {
 				h.logger.Errorf("failed to send error to client: %v", sendErr)
 			}

@@ -1,6 +1,7 @@
 package element
 
 import (
+	"fmt"
 	"sort"
 
 	"webbuilder/internal/domain/entity"
@@ -182,4 +183,85 @@ func CreateElement(root *entity.Element, newElement entity.Element) bool {
 		}
 	}
 	return false
+}
+
+// FindByID returns a pointer to the element with the given id anywhere in the tree, or nil.
+// The pointer aliases the tree, so mutating through it edits the tree in place.
+func FindByID(elements []entity.Element, id string) *entity.Element {
+	for i := range elements {
+		if elements[i].ID == id {
+			return &elements[i]
+		}
+		if found := FindByID(elements[i].Elements, id); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+// MergeMap deep-merges patch into dst and returns the result without mutating either input.
+// A nil value in patch deletes the key; nested maps are merged recursively; any other value
+// (including arrays) replaces the existing one.
+func MergeMap(dst, patch map[string]any) map[string]any {
+	out := make(map[string]any, len(dst)+len(patch))
+	for k, v := range dst {
+		out[k] = v
+	}
+	for k, v := range patch {
+		if v == nil {
+			delete(out, k)
+			continue
+		}
+		if pm, ok := v.(map[string]any); ok {
+			if dm, ok := out[k].(map[string]any); ok {
+				out[k] = MergeMap(dm, pm)
+				continue
+			}
+			// Replacing a non-map (or missing) value: still drop nil entries inside the new map.
+			out[k] = MergeMap(nil, pm)
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// ApplyProperties applies an element-update `properties` map to the element's own fields.
+// Supported keys: name, content, href, src, tailwindStyles (string or null) and isLocked (bool).
+// Unknown keys or wrongly typed values are rejected; properties are never stored in Settings.
+func ApplyProperties(el *entity.Element, props map[string]any) error {
+	for k, v := range props {
+		switch k {
+		case "name", "content", "href", "src", "tailwindStyles":
+			var ptr *string
+			if v != nil {
+				str, ok := v.(string)
+				if !ok {
+					return fmt.Errorf("property %q must be a string or null", k)
+				}
+				ptr = &str
+			}
+			switch k {
+			case "name":
+				el.Name = ptr
+			case "content":
+				el.Content = ptr
+			case "href":
+				el.Href = ptr
+			case "src":
+				el.Src = ptr
+			case "tailwindStyles":
+				el.TailwindStyles = ptr
+			}
+		case "isLocked":
+			b, ok := v.(bool)
+			if !ok {
+				return fmt.Errorf("property %q must be a boolean", k)
+			}
+			el.IsLocked = b
+		default:
+			return fmt.Errorf("unsupported property %q", k)
+		}
+	}
+	return nil
 }

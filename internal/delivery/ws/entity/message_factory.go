@@ -63,11 +63,17 @@ func (f *MessageFactory) MoveElement(payload domainEntity.PayloadElementMove) (d
 // Sanitizes elements prior to creating the message so all required properties
 // are present for the frontend (prevents missing properties from causing UI hangs).
 func (f *MessageFactory) SyncPage(elements []domainEntity.Element, elementWorkflows []domainEntity.ElementEventWorkflow, users []domainEntity.UserPresence) (domainEntity.Message, error) {
+	return f.SyncPageAt(elements, elementWorkflows, users, 0)
+}
+
+// SyncPageAt is SyncPage that also carries the page's current op sequence number.
+func (f *MessageFactory) SyncPageAt(elements []domainEntity.Element, elementWorkflows []domainEntity.ElementEventWorkflow, users []domainEntity.UserPresence, seq int64) (domainEntity.Message, error) {
 	sanitized := sanitizeElements(elements)
 	return f.Create(domainEntity.TypeSync, domainEntity.PayloadSync{
 		Elements:         sanitized,
 		ElementWorkflows: elementWorkflows,
 		Users:            users,
+		Seq:              seq,
 	})
 }
 
@@ -175,6 +181,18 @@ func (f *MessageFactory) ErrorWithErr(code, errMsg string) (domainEntity.Message
 		Message: errMsg,
 	}
 	return f.Create(domainEntity.TypeError, payload)
+}
+
+// ErrorForOp constructs an error message that echoes the failed operation's clientOpId
+// (both on the envelope and in the payload). With an empty clientOpId it equals Error.
+func (f *MessageFactory) ErrorForOp(code, errMsg, clientOpID string) domainEntity.Message {
+	msg, _ := f.Create(domainEntity.TypeError, domainEntity.PayloadError{
+		Code:       code,
+		Message:    errMsg,
+		ClientOpID: clientOpID,
+	})
+	msg.ClientOpID = clientOpID
+	return msg
 }
 
 // Error constructs a standardized error message.

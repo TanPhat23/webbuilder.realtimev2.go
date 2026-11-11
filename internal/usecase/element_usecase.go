@@ -42,6 +42,14 @@ func (uc *elementUseCase) SyncPage(ctx context.Context, projectID string, pageID
 	return uc.docUseCase.GetDocument(ctx, projectID, pageID)
 }
 
+// SyncPageWithSeq is SyncPage plus the page sequence number belonging to the returned elements.
+func (uc *elementUseCase) SyncPageWithSeq(ctx context.Context, projectID string, pageID string) ([]domainEntity.Element, int64, error) {
+	if err := uc.docUseCase.RefreshCache(ctx, projectID, pageID); err != nil {
+		return nil, 0, fmt.Errorf("failed to refresh cache: %w", err)
+	}
+	return uc.docUseCase.GetDocumentWithSeq(ctx, projectID, pageID)
+}
+
 func (uc *elementUseCase) GetElementsByPageID(ctx context.Context, projectID string, pageID string) ([]domainEntity.Element, error) {
 	return uc.docUseCase.GetDocument(ctx, projectID, pageID)
 }
@@ -54,187 +62,141 @@ func (uc *elementUseCase) GetElementsByProjectID(ctx context.Context, projectID 
 	return elementutils.BuildElementTree(flattenElements), nil
 }
 
-func (uc *elementUseCase) CreateElement(ctx context.Context, projectID string, element *domainEntity.Element) error {
+func (uc *elementUseCase) CreateElement(ctx context.Context, projectID string, element *domainEntity.Element) (int64, error) {
 	if err := validation.ValidateElementForAdd(element); err != nil {
-		return domainErrors.Wrap(domainErrors.CodeValidation, err)
+		return 0, domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
 
 	if element.ID == "" {
 		element.ID = uuid.NewString()
 	}
 
-	elements, err := uc.docUseCase.GetDocument(ctx, projectID, element.PageID)
-	if err != nil {
-		return err
+	return uc.docUseCase.MutateDocument(ctx, projectID, element.PageID, func(elements []domainEntity.Element) ([]domainEntity.Element, error) {
+		if element.ParentID != nil && *element.ParentID != "" {
+			inserted := false
+			for i := range elements {
+				if elementutils.CreateElement(&elements[i], *element) {
+					inserted = true
+					break
+				}
+			}
+			if !inserted {
+				if *element.ParentID == "root" {
+					root := domainEntity.Element{
+						ID:       "root",
+						Elements: []domainEntity.Element{*element},
+					}
+					elements = append(elements, root)
+				} else {
+					return nil, domainErrors.New(domainErrors.CodeNotFound, "parent not found", nil)
+				}
+			}
+		} else {
+			element.Order = len(elements)
+			elements = append(elements, *element)
+		}
+		return elements, nil
+	})
+}
+
+func (uc *elementUseCase) UpdateElement(ctx context.Context, projectID string, pageID string, element *domainEntity.Element) (int64, error) {
+	if element == nil || element.ID == "" {
+		return 0, domainErrors.New(domainErrors.CodeValidation, "element id is required", nil)
 	}
 
-	if element.ParentID != nil && *element.ParentID != "" {
-		inserted := false
+	return uc.docUseCase.MutateDocument(ctx, projectID, pageID, func(elements []domainEntity.Element) ([]domainEntity.Element, error) {
 		for i := range elements {
-			if elementutils.CreateElement(&elements[i], *element) {
-				inserted = true
+			if elementutils.UpdateElement(&elements[i], *element) {
+				return elements, nil
+			}
+		}
+		return nil, domainErrors.New(domainErrors.CodeNotFound, "element not found in cache", nil)
+	})
+}
+
+// PatchElement merges the given changes into the element in place:
+//   - styles and settings are deep-merged into the existing maps (a null value deletes the key);
+//   - properties are applied to the element's own fields (see elementutils.ApplyProperties);
+//     they are never written into Settings.
+func (uc *elementUseCase) PatchElement(ctx context.Context, projectID string, pageID string, elementID string, properties map[string]any, styles map[string]any, settings map[string]any) (int64, error) {
+	return uc.docUseCase.MutateDocument(ctx, projectID, pageID, func(elements []domainEntity.Element) ([]domainEntity.Element, error) {
+		target := elementutils.FindByID(elements, elementID)
+		if target == nil {
+			return nil, domainErrors.New(domainErrors.CodeNotFound, "element not found in cache", nil)
+		}
+
+		if len(properties) > 0 {
+			if err := elementutils.ApplyProperties(target, properties); err != nil {
+				return nil, domainErrors.Wrap(domainErrors.CodeValidation, err)
+			}
+		}
+		if len(styles) > 0 {
+			target.Styles = elementutils.MergeMap(target.Styles, styles)
+		}
+		if len(settings) > 0 {
+			target.Settings = elementutils.MergeMap(target.Settings, settings)
+		}
+		return elements, nil
+	})
+}
+
+func (uc *elementUseCase) MoveElement(ctx context.Context, projectID string, pageID string, elementID string, parentID string, index int) (*domainEntity.Element, int64, error) {
+	var result *domainEntity.Element
+
+	seq, err := uc.docUseCase.MutateDocument(ctx, projectID, pageID, func(elements []domainEntity.Element) ([]domainEntity.Element, error) {
+		flat := elementutils.FlattenElements(elements)
+		var target *domainEntity.Element
+		for i := range flat {
+			if flat[i].ID == elementID {
+				target = &flat[i]
 				break
 			}
 		}
-		if !inserted {
-			if *element.ParentID == "root" {
-				root := domainEntity.Element{
-					ID:       "root",
-					Elements: []domainEntity.Element{*element},
-				}
-				elements = append(elements, root)
-			} else {
-				return domainErrors.New(domainErrors.CodeNotFound, "parent not found", nil)
+
+		if target == nil {
+			return nil, domainErrors.New(domainErrors.CodeNotFound, "element not found", nil)
+		}
+
+		updatedFlat := uc.calculateMoveReordering(target, flat, parentID, index)
+
+		result = target
+		for i := range updatedFlat {
+			if updatedFlat[i].ID == elementID {
+				moved := updatedFlat[i]
+				result = &moved
+				break
 			}
 		}
-	} else {
-		element.Order = len(elements)
-		elements = append(elements, *element)
-	}
 
-	// Write-Back Strategy: Update Cache, then Mark Dirty
-	if err := uc.docUseCase.AddElementsToDocument(ctx, projectID, element.PageID, elements); err != nil {
-		return err
+		return elementutils.BuildElementTree(updatedFlat), nil
+	})
+	if err != nil {
+		return nil, 0, err
 	}
-
-	return uc.persistUseCase.MarkDirty(ctx, projectID, element.PageID)
+	return result, seq, nil
 }
 
-func (uc *elementUseCase) UpdateElement(ctx context.Context, projectID string, pageID string, element *domainEntity.Element) error {
-	if element == nil || element.ID == "" {
-		return domainErrors.New(domainErrors.CodeValidation, "element id is required", nil)
-	}
-
-	elements, err := uc.docUseCase.GetDocument(ctx, projectID, pageID)
-	if err != nil {
-		return err
-	}
-
-	found := false
-	for i := range elements {
-		if elementutils.UpdateElement(&elements[i], *element) {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return domainErrors.New(domainErrors.CodeNotFound, "element not found in cache", nil)
-	}
-
-	if err := uc.docUseCase.AddElementsToDocument(ctx, projectID, pageID, elements); err != nil {
-		return err
-	}
-
-	return uc.persistUseCase.MarkDirty(ctx, projectID, pageID)
-}
-
-func (uc *elementUseCase) PatchElement(ctx context.Context, projectID string, pageID string, elementID string, properties map[string]any, styles map[string]any, settings map[string]any) error {
-	elements, err := uc.docUseCase.GetDocument(ctx, projectID, pageID)
-	if err != nil {
-		return err
-	}
-
-	flat := elementutils.FlattenElements(elements)
-	found := false
-	for i := range flat {
-		if flat[i].ID == elementID {
-			if properties != nil {
-				flat[i].Settings = properties
+func (uc *elementUseCase) RemoveElement(ctx context.Context, projectID string, pageID string, elementID string) (int64, error) {
+	return uc.docUseCase.MutateDocument(ctx, projectID, pageID, func(elements []domainEntity.Element) ([]domainEntity.Element, error) {
+		newRoots := make([]domainEntity.Element, 0, len(elements))
+		removed := false
+		for _, r := range elements {
+			if r.ID == elementID {
+				removed = true
+				continue
 			}
-			if styles != nil {
-				flat[i].Styles = styles
-			}
-			if settings != nil {
-				flat[i].Settings = settings
-			}
-			found = true
-			break
+			newRoots = append(newRoots, r)
 		}
-	}
-
-	if !found {
-		return domainErrors.New(domainErrors.CodeNotFound, "element not found in cache", nil)
-	}
-
-	newTree := elementutils.BuildElementTree(flat)
-	if err := uc.docUseCase.AddElementsToDocument(ctx, projectID, pageID, newTree); err != nil {
-		return err
-	}
-
-	return uc.persistUseCase.MarkDirty(ctx, projectID, pageID)
-}
-
-func (uc *elementUseCase) MoveElement(ctx context.Context, projectID string, pageID string, elementID string, parentID string, index int) (*domainEntity.Element, error) {
-	elements, err := uc.docUseCase.GetDocument(ctx, projectID, pageID)
-	if err != nil {
-		return nil, err
-	}
-
-	flat := elementutils.FlattenElements(elements)
-	var target *domainEntity.Element
-	for i := range flat {
-		if flat[i].ID == elementID {
-			target = &flat[i]
-			break
+		if removed {
+			return newRoots, nil
 		}
-	}
-
-	if target == nil {
-		return nil, domainErrors.New(domainErrors.CodeNotFound, "element not found", nil)
-	}
-
-	updatedFlat := uc.calculateMoveReordering(target, flat, parentID, index)
-
-	newTree := elementutils.BuildElementTree(updatedFlat)
-	if err := uc.docUseCase.AddElementsToDocument(ctx, projectID, pageID, newTree); err != nil {
-		return nil, err
-	}
-
-	if err := uc.persistUseCase.MarkDirty(ctx, projectID, pageID); err != nil {
-		return nil, err
-	}
-
-	for _, e := range updatedFlat {
-		if e.ID == elementID {
-			return &e, nil
-		}
-	}
-
-	return target, nil
-}
-
-func (uc *elementUseCase) RemoveElement(ctx context.Context, projectID string, pageID string, elementID string) error {
-	elements, err := uc.docUseCase.GetDocument(ctx, projectID, pageID)
-	if err != nil {
-		return err
-	}
-
-	removed := false
-	newRoots := make([]domainEntity.Element, 0, len(elements))
-	for _, r := range elements {
-		if r.ID == elementID {
-			removed = true
-			continue
-		}
-		newRoots = append(newRoots, r)
-	}
-	if removed {
-		elements = newRoots
-	} else {
 		for i := range elements {
 			if elementutils.DeleteElement(&elements[i], elementID) {
-				removed = true
-				break
+				return elements, nil
 			}
 		}
-	}
-
-	if err := uc.docUseCase.AddElementsToDocument(ctx, projectID, pageID, elements); err != nil {
-		return err
-	}
-
-	return uc.persistUseCase.MarkDirty(ctx, projectID, pageID)
+		return nil, domainErrors.New(domainErrors.CodeNotFound, "element not found", nil)
+	})
 }
 
 func (uc *elementUseCase) calculateMoveReordering(element *domainEntity.Element, all []domainEntity.Element, targetParentID string, targetIndex int) []domainEntity.Element {

@@ -3,11 +3,13 @@ package entity
 import (
 	"context"
 	"sync"
-	"time"
 
 	domainEntity "webbuilder/internal/domain/entity"
 	"webbuilder/internal/utils/logger"
 )
+
+// roomBroadcastBuffer is the capacity of a room's inbound broadcast queue.
+const roomBroadcastBuffer = 1024
 
 // roomBroadcast encapsulates a message targeted at a room and an optional
 // sender which should not receive the message.
@@ -41,7 +43,7 @@ func NewRoom(roomID string, parentCtx context.Context, wg *sync.WaitGroup, sendB
 		clients:    make(map[*Client]bool),
 		register:   make(chan registerRequest),
 		unregister: make(chan unregisterRequest),
-		broadcast:  make(chan roomBroadcast),
+		broadcast:  make(chan roomBroadcast, roomBroadcastBuffer),
 		ctx:        ctx,
 		cancel:     cancel,
 		wg:         wg,
@@ -72,10 +74,10 @@ func (r *Room) run() {
 			client := req.client
 			r.mu.Lock()
 			if _, ok := r.clients[client]; !ok {
-				client.send = make(chan domainEntity.Message, r.sendBuf)
+				send := client.openSend(r.sendBuf)
 				r.clients[client] = true
 				r.wg.Add(1)
-				go r.clientWriter(client)
+				go r.clientWriter(client, send)
 			}
 			r.mu.Unlock()
 
@@ -113,10 +115,13 @@ func (r *Room) run() {
 				if msg.sender != nil && client == msg.sender {
 					continue
 				}
-				select {
-				case client.send <- msg.message:
-				default:
-					// slow client: remove and close its send channel
+				if !client.TrySend(msg.message) {
+					// Slow client: never drop a single message silently (clients rely on
+					// gap-free seq numbers). Close its send channel, which makes the writer
+					// close the connection, so the client reconnects and resyncs.
+					if r.logger != nil {
+						r.logger.Errorf("room %s: client send buffer full (user=%s), closing connection to force resync", r.PageID, clientUserID(client))
+					}
 					client.CloseSend()
 					delete(r.clients, client)
 				}
@@ -128,36 +133,48 @@ func (r *Room) run() {
 
 // clientWriter is responsible for writing messages from a client's send
 // channel to the WebSocket connection. It uses the room's context to stop.
-func (r *Room) clientWriter(c *Client) {
+func (r *Room) clientWriter(c *Client, send <-chan domainEntity.Message) {
 	defer r.wg.Done()
-
-	const writeWait = 10 * time.Second
 
 	for {
 		select {
 		case <-r.ctx.Done():
-			_ = c.Conn.Close()
+			c.CloseConn()
 			return
 
-		case msg, ok := <-c.send:
+		case msg, ok := <-send:
 			if !ok {
-				_ = c.Conn.Close()
+				c.CloseConn()
 				return
 			}
 
-			if d, ok := any(c.Conn).(interface{ SetWriteDeadline(time.Time) error }); ok {
-				_ = d.SetWriteDeadline(time.Now().Add(writeWait))
-			}
-
-			if err := c.Conn.WriteJSON(msg); err != nil {
+			if err := c.WriteJSON(msg); err != nil {
 				if r.logger != nil {
 					r.logger.Errorf("websocket write error (page=%s): %v", c.PageID, err)
 				}
-				_ = c.Conn.Close()
+				c.CloseConn()
 				return
 			}
 		}
 	}
+}
+
+// closeAllClients closes every client's send channel (and therefore their connections)
+// and removes them from the room. Used when the room can no longer guarantee delivery.
+func (r *Room) closeAllClients() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for client := range r.clients {
+		client.CloseSend()
+		delete(r.clients, client)
+	}
+}
+
+func clientUserID(c *Client) string {
+	if c != nil && c.User != nil {
+		return c.User.ID
+	}
+	return ""
 }
 
 func (r *Room) GetParticipants() []domainEntity.UserPresence {

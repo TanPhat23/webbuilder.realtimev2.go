@@ -14,6 +14,9 @@ import (
 type fakeDocUseCase struct {
 	doc   []entity.Element
 	added []entity.Element
+	seq   int64
+	// persist mimics the repository marking the page dirty inside the same atomic update.
+	persist *fakePersistUseCase
 }
 
 func (f *fakeDocUseCase) GetDocument(ctx context.Context, projectID string, pageID string) ([]entity.Element, error) {
@@ -25,6 +28,26 @@ func (f *fakeDocUseCase) GetDocument(ctx context.Context, projectID string, page
 
 func (f *fakeDocUseCase) RefreshCache(ctx context.Context, projectID string, pageID string) error {
 	return nil
+}
+
+func (f *fakeDocUseCase) GetDocumentWithSeq(ctx context.Context, projectID string, pageID string) ([]entity.Element, int64, error) {
+	return f.doc, f.seq, nil
+}
+
+func (f *fakeDocUseCase) MutateDocument(ctx context.Context, projectID string, pageID string, mutate domainRepo.DocumentMutateFunc) (int64, error) {
+	out := make([]entity.Element, len(f.doc))
+	copy(out, f.doc)
+	updated, err := mutate(out)
+	if err != nil {
+		return 0, err
+	}
+	f.added = make([]entity.Element, len(updated))
+	copy(f.added, updated)
+	f.seq++
+	if f.persist != nil {
+		_ = f.persist.MarkDirty(ctx, projectID, pageID)
+	}
+	return f.seq, nil
 }
 
 func (f *fakeDocUseCase) AddElementsToDocument(ctx context.Context, projectID string, pageID string, elements []entity.Element) error {
@@ -85,9 +108,10 @@ func TestMoveElement_ReordersAcrossParents(t *testing.T) {
 
 	doc := &fakeDocUseCase{doc: initial}
 	prst := &fakePersistUseCase{}
+	doc.persist = prst
 	uc := usecase.NewElementUseCase(&domainRepo.Repository{}, doc, prst)
 
-	moved, err := uc.MoveElement(ctx, "proj1", "page1", "c1", "p2", 1)
+	moved, _, err := uc.MoveElement(ctx, "proj1", "page1", "c1", "p2", 1)
 	if err != nil {
 		t.Fatalf("unexpected error from MoveElement: %v", err)
 	}
@@ -162,9 +186,10 @@ func TestUpdateElement_UseCase(t *testing.T) {
 
 	doc := &fakeDocUseCase{doc: initial}
 	prst := &fakePersistUseCase{}
+	doc.persist = prst
 	uc := usecase.NewElementUseCase(&domainRepo.Repository{}, doc, prst)
 
-	err := uc.UpdateElement(ctx, "proj1", "page1", &entity.Element{ID: "child", Type: "newType"})
+	_, err := uc.UpdateElement(ctx, "proj1", "page1", &entity.Element{ID: "child", Type: "newType"})
 	if err != nil {
 		t.Fatalf("unexpected error from UpdateElement: %v", err)
 	}
@@ -207,9 +232,10 @@ func TestRemoveElement_UseCase(t *testing.T) {
 
 	doc := &fakeDocUseCase{doc: initial}
 	prst := &fakePersistUseCase{}
+	doc.persist = prst
 	uc := usecase.NewElementUseCase(&domainRepo.Repository{}, doc, prst)
 
-	if err := uc.RemoveElement(ctx, "proj2", "page2", "grand"); err != nil {
+	if _, err := uc.RemoveElement(ctx, "proj2", "page2", "grand"); err != nil {
 		t.Fatalf("unexpected error from RemoveElement: %v", err)
 	}
 
@@ -246,6 +272,7 @@ func TestCreateElement_UseCase(t *testing.T) {
 
 	doc := &fakeDocUseCase{doc: initial}
 	prst := &fakePersistUseCase{}
+	doc.persist = prst
 	uc := usecase.NewElementUseCase(&domainRepo.Repository{}, doc, prst)
 
 	newEl := entity.Element{
@@ -255,7 +282,7 @@ func TestCreateElement_UseCase(t *testing.T) {
 		Order:  1,
 	}
 
-	if err := uc.CreateElement(ctx, "proj3", &newEl); err != nil {
+	if _, err := uc.CreateElement(ctx, "proj3", &newEl); err != nil {
 		t.Fatalf("unexpected error from CreateElement: %v", err)
 	}
 
@@ -295,12 +322,13 @@ func TestCreateElement_EmptyParentStringTreatedAsRoot(t *testing.T) {
 
 	doc := &fakeDocUseCase{doc: initial}
 	prst := &fakePersistUseCase{}
+	doc.persist = prst
 	uc := usecase.NewElementUseCase(&domainRepo.Repository{}, doc, prst)
 
 	// parentId is an empty string - should be accepted and treated as no parent,
 	// which results in the element being appended at root-level (top-level element).
 	newEl := entity.Element{Type: "button", PageID: "pageTest", ParentID: strPtr("")}
-	if err := uc.CreateElement(ctx, "projTest", &newEl); err != nil {
+	if _, err := uc.CreateElement(ctx, "projTest", &newEl); err != nil {
 		t.Fatalf("unexpected error from CreateElement with empty parentId: %v", err)
 	}
 
@@ -340,6 +368,7 @@ func TestCreateElement_InsertUnderParent(t *testing.T) {
 
 	doc := &fakeDocUseCase{doc: initial}
 	prst := &fakePersistUseCase{}
+	doc.persist = prst
 	uc := usecase.NewElementUseCase(&domainRepo.Repository{}, doc, prst)
 
 	// create an element under parent 'root'
@@ -349,7 +378,7 @@ func TestCreateElement_InsertUnderParent(t *testing.T) {
 		PageID:   "page3",
 		ParentID: strPtr("root"),
 	}
-	if err := uc.CreateElement(ctx, "proj3", &el); err != nil {
+	if _, err := uc.CreateElement(ctx, "proj3", &el); err != nil {
 		t.Fatalf("unexpected error from CreateElement: %v", err)
 	}
 
