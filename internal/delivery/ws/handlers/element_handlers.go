@@ -70,7 +70,7 @@ func (h *Handler) handleElementCreate(ctx context.Context, client *wsentity.Clie
 
 	return h.applyAndBroadcast(ctx, client, msg, payload.Element.PageID,
 		func(ctx context.Context) (int64, error) {
-			return h.uc.Element.CreateElement(ctx, client.ProjectID, &payload.Element)
+			return h.uc.Element.CreateElementAt(ctx, client.ProjectID, &payload.Element, payload.Position)
 		},
 		func(f *wsentity.MessageFactory) (domainEntity.Message, error) {
 			return f.CreateElement(payload.Element)
@@ -160,9 +160,17 @@ func (h *Handler) handleElementMove(ctx context.Context, client *wsentity.Client
 		parentID = *payload.ParentID
 	}
 
+	if err := validation.ValidateElementMove(&payload); err != nil {
+		return domainErrors.Wrap(domainErrors.CodeValidation, err)
+	}
 	return h.applyAndBroadcast(ctx, client, msg, client.PageID,
 		func(ctx context.Context) (int64, error) {
-			_, seq, err := h.uc.Element.MoveElement(ctx, client.ProjectID, client.PageID, payload.ID, parentID, payload.Order)
+			moved, seq, err := h.uc.Element.MoveElement(ctx, client.ProjectID, client.PageID, payload.ID, parentID, payload.Order)
+			if err == nil {
+				payload.Order = moved.Order
+				payload.OrderKey = moved.OrderKey
+				payload.ParentID = moved.ParentID
+			}
 			return seq, err
 		},
 		func(f *wsentity.MessageFactory) (domainEntity.Message, error) {

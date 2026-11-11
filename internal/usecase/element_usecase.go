@@ -47,7 +47,14 @@ func (uc *elementUseCase) SyncPageWithSeq(ctx context.Context, projectID string,
 	if err := uc.docUseCase.RefreshCache(ctx, projectID, pageID); err != nil {
 		return nil, 0, fmt.Errorf("failed to refresh cache: %w", err)
 	}
-	return uc.docUseCase.GetDocumentWithSeq(ctx, projectID, pageID)
+	elements, seq, err := uc.docUseCase.GetDocumentWithSeq(ctx, projectID, pageID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := elementutils.NormalizeOrder(elements); err != nil {
+		return nil, 0, err
+	}
+	return elements, seq, nil
 }
 
 func (uc *elementUseCase) GetElementsByPageID(ctx context.Context, projectID string, pageID string) ([]domainEntity.Element, error) {
@@ -63,38 +70,61 @@ func (uc *elementUseCase) GetElementsByProjectID(ctx context.Context, projectID 
 }
 
 func (uc *elementUseCase) CreateElement(ctx context.Context, projectID string, element *domainEntity.Element) (int64, error) {
+	return uc.CreateElementAt(ctx, projectID, element, nil)
+}
+
+func (uc *elementUseCase) CreateElementAt(ctx context.Context, projectID string, element *domainEntity.Element, position *int) (int64, error) {
 	if err := validation.ValidateElementForAdd(element); err != nil {
 		return 0, domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
-
 	if element.ID == "" {
 		element.ID = uuid.NewString()
 	}
-
-	return uc.docUseCase.MutateDocument(ctx, projectID, element.PageID, func(elements []domainEntity.Element) ([]domainEntity.Element, error) {
-		if element.ParentID != nil && *element.ParentID != "" {
-			inserted := false
-			for i := range elements {
-				if elementutils.CreateElement(&elements[i], *element) {
-					inserted = true
-					break
-				}
-			}
-			if !inserted {
-				if *element.ParentID == "root" {
-					root := domainEntity.Element{
-						ID:       "root",
-						Elements: []domainEntity.Element{*element},
-					}
-					elements = append(elements, root)
-				} else {
-					return nil, domainErrors.New(domainErrors.CodeNotFound, "parent not found", nil)
-				}
-			}
-		} else {
-			element.Order = len(elements)
-			elements = append(elements, *element)
+	// The closure may be retried by Redis; never use output of a previous attempt as input.
+	input := *element
+	return uc.docUseCase.MutateDocument(ctx, projectID, input.PageID, func(elements []domainEntity.Element) ([]domainEntity.Element, error) {
+		if err := elementutils.NormalizeOrder(elements); err != nil {
+			return nil, err
 		}
+		if elementutils.FindByID(elements, input.ID) != nil {
+			return nil, domainErrors.New(domainErrors.CodeValidation, "element already exists", nil)
+		}
+		parentID := ""
+		if input.ParentID != nil {
+			parentID = *input.ParentID
+		}
+		children := elementutils.Children(&elements, parentID)
+		if children == nil && parentID == "root" {
+			var err error
+			elements, err = elementutils.InsertAt(elements, domainEntity.Element{ID: "root"}, len(elements))
+			if err != nil {
+				return nil, err
+			}
+			children = &elements[len(elements)-1].Elements
+		}
+		if children == nil {
+			return nil, domainErrors.New(domainErrors.CodeNotFound, "parent not found", nil)
+		}
+		index := len(*children)
+		if position != nil {
+			index = *position
+		}
+		if index < 0 || index > len(*children) {
+			return nil, domainErrors.New(domainErrors.CodeValidation, "position out of range", nil)
+		}
+		created := input
+		if parentID == "" {
+			created.ParentID = nil
+		}
+		if err := elementutils.NormalizeOrder(created.Elements); err != nil {
+			return nil, err
+		}
+		updated, err := elementutils.InsertAt(*children, created, index)
+		if err != nil {
+			return nil, err
+		}
+		*children = updated
+		*element = updated[index]
 		return elements, nil
 	})
 }
@@ -142,33 +172,47 @@ func (uc *elementUseCase) PatchElement(ctx context.Context, projectID string, pa
 
 func (uc *elementUseCase) MoveElement(ctx context.Context, projectID string, pageID string, elementID string, parentID string, index int) (*domainEntity.Element, int64, error) {
 	var result *domainEntity.Element
-
+	if index < 0 {
+		return nil, 0, domainErrors.New(domainErrors.CodeValidation, "position out of range", nil)
+	}
 	seq, err := uc.docUseCase.MutateDocument(ctx, projectID, pageID, func(elements []domainEntity.Element) ([]domainEntity.Element, error) {
-		flat := elementutils.FlattenElements(elements)
-		var target *domainEntity.Element
-		for i := range flat {
-			if flat[i].ID == elementID {
-				target = &flat[i]
-				break
-			}
+		if err := elementutils.NormalizeOrder(elements); err != nil {
+			return nil, err
 		}
-
+		target := elementutils.FindByID(elements, elementID)
 		if target == nil {
 			return nil, domainErrors.New(domainErrors.CodeNotFound, "element not found", nil)
 		}
-
-		updatedFlat := uc.calculateMoveReordering(target, flat, parentID, index)
-
-		result = target
-		for i := range updatedFlat {
-			if updatedFlat[i].ID == elementID {
-				moved := updatedFlat[i]
-				result = &moved
-				break
+		if parentID != "" {
+			if elementID == parentID || elementutils.FindByID(target.Elements, parentID) != nil {
+				return nil, domainErrors.New(domainErrors.CodeValidation, "invalid parent", nil)
+			}
+			if elementutils.FindByID(elements, parentID) == nil {
+				return nil, domainErrors.New(domainErrors.CodeNotFound, "parent not found", nil)
 			}
 		}
-
-		return elementutils.BuildElementTree(updatedFlat), nil
+		moved := elementutils.Detach(&elements, elementID)
+		children := elementutils.Children(&elements, parentID)
+		if children == nil {
+			return nil, domainErrors.New(domainErrors.CodeNotFound, "parent not found", nil)
+		}
+		if index > len(*children) {
+			return nil, domainErrors.New(domainErrors.CodeValidation, "position out of range", nil)
+		}
+		if parentID == "" {
+			moved.ParentID = nil
+		} else {
+			parent := parentID
+			moved.ParentID = &parent
+		}
+		updated, err := elementutils.InsertAt(*children, *moved, index)
+		if err != nil {
+			return nil, err
+		}
+		*children = updated
+		committed := updated[index]
+		result = &committed
+		return elements, nil
 	})
 	if err != nil {
 		return nil, 0, err
@@ -197,76 +241,4 @@ func (uc *elementUseCase) RemoveElement(ctx context.Context, projectID string, p
 		}
 		return nil, domainErrors.New(domainErrors.CodeNotFound, "element not found", nil)
 	})
-}
-
-func (uc *elementUseCase) calculateMoveReordering(element *domainEntity.Element, all []domainEntity.Element, targetParentID string, targetIndex int) []domainEntity.Element {
-	origParent := element.ParentID
-	var oldSiblings []domainEntity.Element
-	var newSiblings []domainEntity.Element
-
-	// Split into sibling sets
-	for _, e := range all {
-		if elementutils.ParentsEqual(e.ParentID, origParent) && e.ID != element.ID {
-			oldSiblings = append(oldSiblings, e)
-		}
-		if elementutils.CompareParent(e.ParentID, targetParentID) && e.ID != element.ID {
-			newSiblings = append(newSiblings, e)
-		}
-	}
-
-	// Handle move within the same parent
-	if elementutils.CompareParent(origParent, targetParentID) {
-		newSiblings = oldSiblings
-	}
-
-	// Clamp index
-	if targetIndex > len(newSiblings) {
-		targetIndex = len(newSiblings)
-	}
-
-	// Build updated target list
-	updatedTarget := make([]domainEntity.Element, 0, len(newSiblings)+1)
-	updatedTarget = append(updatedTarget, newSiblings[:targetIndex]...)
-
-	moved := *element
-	if targetParentID == "" {
-		moved.ParentID = nil
-	} else {
-		pID := targetParentID
-		moved.ParentID = &pID
-	}
-	updatedTarget = append(updatedTarget, moved)
-	updatedTarget = append(updatedTarget, newSiblings[targetIndex:]...)
-
-	// Assign orders for target siblings
-	for i := range updatedTarget {
-		updatedTarget[i].Order = i
-	}
-
-	// Assign orders for old siblings if they changed
-	var toUpdate []domainEntity.Element
-	toUpdate = append(toUpdate, updatedTarget...)
-
-	if !elementutils.CompareParent(origParent, targetParentID) {
-		for i := range oldSiblings {
-			oldSiblings[i].Order = i
-			toUpdate = append(toUpdate, oldSiblings[i])
-		}
-	}
-
-	// Merge back with non-involved elements
-	resultMap := make(map[string]domainEntity.Element)
-	for _, e := range all {
-		resultMap[e.ID] = e
-	}
-	for _, e := range toUpdate {
-		resultMap[e.ID] = e
-	}
-
-	final := make([]domainEntity.Element, 0, len(all))
-	for _, e := range resultMap {
-		final = append(final, e)
-	}
-
-	return final
 }

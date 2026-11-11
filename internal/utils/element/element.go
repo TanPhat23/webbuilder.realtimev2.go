@@ -73,9 +73,22 @@ func BuildElementTree(elements []entity.Element) []entity.Element {
 	}
 
 	for pid, cids := range childrenMap {
+		keyed := true
+		for _, id := range cids {
+			if elementMap[id].OrderKey == "" {
+				keyed = false
+				break
+			}
+		}
 		sort.SliceStable(cids, func(i, j int) bool {
 			a := elementMap[cids[i]]
 			b := elementMap[cids[j]]
+			if keyed {
+				if a.OrderKey != b.OrderKey {
+					return a.OrderKey < b.OrderKey
+				}
+				return a.ID < b.ID
+			}
 			if a.Order != b.Order {
 				return a.Order < b.Order
 			}
@@ -84,9 +97,22 @@ func BuildElementTree(elements []entity.Element) []entity.Element {
 		childrenMap[pid] = cids
 	}
 
+	keyed := true
+	for _, id := range roots {
+		if elementMap[id].OrderKey == "" {
+			keyed = false
+			break
+		}
+	}
 	sort.SliceStable(roots, func(i, j int) bool {
 		a := elementMap[roots[i]]
 		b := elementMap[roots[j]]
+		if keyed {
+			if a.OrderKey != b.OrderKey {
+				return a.OrderKey < b.OrderKey
+			}
+			return a.ID < b.ID
+		}
 		if a.Order != b.Order {
 			return a.Order < b.Order
 		}

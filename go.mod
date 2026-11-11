@@ -9,6 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/redis/go-redis/v9 v9.17.2
+	roci.dev/fracdex v0.0.0-20241211175510-82d7df79e312
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
 )

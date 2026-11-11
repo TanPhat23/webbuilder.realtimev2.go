@@ -20,6 +20,7 @@ type ElementUseCase interface {
 
 	// CreateElement creates a new element in the given project/page and refreshes the page cache.
 	CreateElement(ctx context.Context, projectID string, element *entity.Element) (int64, error)
+	CreateElementAt(ctx context.Context, projectID string, element *entity.Element, position *int) (int64, error)
 	// UpdateElement replaces an existing element and refreshes the page cache.
 	UpdateElement(ctx context.Context, projectID string, pageID string, element *entity.Element) (int64, error)
 	// PatchElement merges granular updates into an element: styles and settings are deep-merged

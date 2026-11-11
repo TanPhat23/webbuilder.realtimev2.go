@@ -37,7 +37,7 @@ const (
 	TypeElementWorkflowDelete MessageType = "element-workflow:delete"
 
 	// Synchronization
-	TypeSync        MessageType = "sync:page"         // Initial state request/response
+	TypeSync        MessageType = "sync:page"    // Initial state request/response
 	TypeSyncProject MessageType = "sync:project" // Project-wide sync
 	TypeSnapshot    MessageType = "snapshot"     // Save/Load full state
 	TypeError       MessageType = "error"        // Server-side error reporting
@@ -84,7 +84,8 @@ type PayloadPresence struct {
 
 // PayloadElementCreate used when a new component is dragged onto the canvas
 type PayloadElementCreate struct {
-	Element Element `json:"element"`
+	Element  Element `json:"element"`
+	Position *int    `json:"position,omitempty"`
 }
 
 // PayloadElementUpdate for granular patches to avoid sending the whole object
@@ -110,6 +111,7 @@ type PayloadElementMove struct {
 	ID       string  `json:"id"`
 	ParentID *string `json:"parentId"` // Null if root
 	Order    int     `json:"order"`
+	OrderKey string  `json:"orderKey,omitempty"`
 }
 
 // PayloadElementDelete
@@ -182,11 +184,12 @@ type Presence struct {
 
 // UserPresence represents a synchronized user for `sync:page` payloads.
 // Matches the client-side SyncUser interface shape:
-// {
-//   userId: string;
-//   userName: string;
-//   presence: { cursorX:number, cursorY:number, elementId?: string | null }
-// }
+//
+//	{
+//	  userId: string;
+//	  userName: string;
+//	  presence: { cursorX:number, cursorY:number, elementId?: string | null }
+//	}
 type UserPresence struct {
 	UserID   string   `json:"userId"`
 	UserName string   `json:"userName"`
