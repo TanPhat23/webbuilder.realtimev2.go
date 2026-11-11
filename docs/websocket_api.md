@@ -41,6 +41,9 @@ The envelope includes the following fields:
 | `requestId` | `string` | Optional client-generated ID to correlate request/response (useful for acknowledgements) |
 | `timestamp` | `int64`  | Unix milliseconds                                                                        |
 | `payload`   | `object` | Action-specific data                                                                     |
+| `clientOpId` | `string` | Optional client-generated operation id on `element:*` requests. Echoed on the resulting broadcast and on `error` replies (see [Ordering and acknowledgements](#ordering-and-acknowledgements)). |
+| `requestId` | `string` | Optional client-generated request id. Echoed on the reply to that request: the `element:*` broadcast, the `sync:page` / `sync:project` response, or an `error`. |
+| `seq`       | `int64`  | Server-assigned, per-page sequence number. Present only on `element:create/update/move/delete` broadcasts. |
 
 Example envelope (client -> server):
 
@@ -63,7 +66,7 @@ Example envelope (client -> server):
 }
 ```
 
-On success, the server will broadcast an `element:create` message to other clients including server-assigned fields (e.g., `id`, `createdAt`, `createdBy`) and may include the original `requestId` for correlation.
+On success, the server will broadcast an `element:create` message to all clients in the room (including the sender) including server-assigned fields (e.g., `id`, `createdAt`, `createdBy`) and may include the original `requestId` for correlation.
 
 ---
 
@@ -200,6 +203,10 @@ Updates only the provided fields (patch semantics).
 
 Notes:
 
+- Updates are **merged**, never replaced:
+  - `styles` and `settings` are deep-merged into the stored maps. A key whose value is JSON `null` is deleted. Nested objects are merged recursively; arrays and scalars replace the stored value.
+  - `properties` set the element's own fields. Supported keys: `name`, `content`, `href`, `src`, `tailwindStyles` (string or `null`) and `isLocked` (boolean). Unknown keys or wrongly typed values are rejected with `VALIDATION_ERROR`. Properties are never written into `settings`.
+  - For compatibility with the web client, `name`, `content`, `src`, `href` and `tailwindStyles` are also accepted as top-level payload fields; they are equivalent to the same keys in `properties` (an explicit `properties` entry wins).
 - The server merges partial updates into the stored element; the broadcasted message is authoritative.
 - Conflict resolution is handled server-side (e.g., timestamp-based LWW or optimistic locking); clients should apply server broadcasts as source of truth.
 
@@ -229,22 +236,56 @@ Reparents or reorders an element.
 }
 ```
 
-### Sync Request
+### Sync Page Request
 
 Force a refresh of the current page state.
 
-- **Type:** `sync`
+- **Type:** `sync:page`
 - **Payload:** Empty
+
+Example:
+```json
+{
+  "type": "sync:page",
+  "projectId": "project-123",
+  "pageId": "page-456",
+  "userId": "user-abc",
+  "requestId": "req-sync-1",
+  "timestamp": 1680000020000,
+  "payload": {}
+}
+```
+
+### Sync Project Request
+
+Force a refresh of the entire project state (all pages, workflows, element workflows).
+
+- **Type:** `sync:project`
+- **Payload:** Empty
+
+Example:
+```json
+{
+  "type": "sync:project",
+  "projectId": "project-123",
+  "userId": "user-abc",
+  "requestId": "req-sync-proj-1",
+  "timestamp": 1680000020000,
+  "payload": {}
+}
+```
+
+Note: Project-wide sync does not require a `pageId` and returns state for all pages in the project.
 
 ---
 
 ## 4. Server to Client Messages
 
-### Initial State Sync
+### Initial Page State Sync
 
-Sent automatically after a successful `join` or requested via `sync`. This message contains the authoritative document snapshot for the current page and the presence information for active users.
+Sent automatically after a successful `join` or requested via `sync:page`. This message contains the authoritative document snapshot for the current page and the presence information for active users.
 
-- **Type:** `sync`
+- **Type:** `sync:page`
 - **Payload:**
 
 ```json
@@ -271,7 +312,93 @@ Sent automatically after a successful `join` or requested via `sync`. This messa
         "elementId": null
       }
     }
+  ],
+  "seq": 41
+}
+```
+
+`seq` is the page's current sequence number (0 if no operation has been applied yet). The `elements` snapshot already contains every operation with `seq <= payload.seq`; the next operation to apply is `seq + 1`.
+
+Server Response Example (with requestId correlation):
+```json
+{
+  "type": "sync:page",
+  "projectId": "project-123",
+  "pageId": "page-456",
+  "userId": "system",
+  "requestId": "req-sync-1",
+  "timestamp": 1680000020100,
+  "payload": {
+    "elements": [...],
+    "users": [...]
+  }
+}
+```
+
+### Project State Sync
+
+Sent in response to a `sync:project` request. This message contains the authoritative state for the entire project, including all pages, workflows, and element workflows.
+
+- **Type:** `sync:project`
+- **Payload:**
+
+```json
+{
+  "elements": [
+    {
+      "id": "uuid-1111",
+      "type": "text",
+      "settings": { "content": "Hello World" },
+      "styles": { "fontSize": 14, "color": "black" },
+      "order": 0,
+      "parentId": null,
+      "createdAt": 1680000001000,
+      "createdBy": "user-abc"
+    }
+  ],
+  "workflows": [
+    {
+      "id": "workflow-1",
+      "name": "Main Workflow",
+      "createdAt": 1680000001000,
+      "createdBy": "user-abc"
+    }
+  ],
+  "elementWorkflows": [
+    {
+      "id": "elem-workflow-1",
+      "elementId": "uuid-1111",
+      "workflowId": "workflow-1"
+    }
+  ],
+  "users": [
+    {
+      "userId": "user-abc",
+      "userName": "Alice",
+      "presence": {
+        "cursorX": 0.5,
+        "cursorY": 0.2,
+        "elementId": null
+      }
+    }
   ]
+}
+```
+
+Server Response Example (with requestId correlation):
+```json
+{
+  "type": "sync:project",
+  "projectId": "project-123",
+  "userId": "system",
+  "requestId": "req-sync-proj-1",
+  "timestamp": 1680000020100,
+  "payload": {
+    "elements": [...],
+    "workflows": [...],
+    "elementWorkflows": [...],
+    "users": [...]
+  }
 }
 ```
 
@@ -297,8 +424,11 @@ ws.addEventListener('open', () => {
 ws.addEventListener('message', (ev) => {
   const msg = JSON.parse(ev.data);
   switch (msg.type) {
-    case 'sync':
-      // replace local document with msg.payload.elements
+    case 'sync:page':
+      // replace local page document with msg.payload.elements
+      break;
+    case 'sync:project':
+      // replace entire project state with elements, workflows, and elementWorkflows
       break;
     case 'element:create':
       // insert element
@@ -316,13 +446,37 @@ ws.addEventListener('message', (ev) => {
 Reconnection guidance:
 
 - Use exponential backoff with jitter (e.g., base 500ms, multiplier 1.5, max 30s).
-- On reconnect, re-send `join` (with same `userId`) and request a `sync` if needed.
+- On reconnect, re-send `join` (with same `userId`) and request a `sync:page` if needed.
 - Use `requestId` and message `timestamp`/server-assigned `id` to deduplicate and reconcile missed messages.
-- Apply server-sent `sync` as authoritative snapshot; reconcile client optimistic updates by matching `requestId` or element IDs.
+- Apply server-sent `sync:page` as authoritative snapshot; reconcile client optimistic updates by matching `requestId` or element IDs.
 
 ### Broadcasted Operations
 
-When another user performs an action (create, update, delete, move), the server broadcasts the exact same message type and payload to all other participants in the room.
+When a user performs an element action (create, update, delete, move), the server applies it and broadcasts the same message type and payload to **all** participants in the room, **including the sender**. Presence, comment and workflow messages are unchanged (presence is still not echoed to its sender and carries no `seq`).
+
+#### Ordering and acknowledgements
+
+Every successful `element:create/update/move/delete` gets the next per-page `seq` (1, 2, 3, ...), assigned atomically with the change in Redis, so it is consistent across server instances. The broadcast envelope carries it:
+
+```json
+{
+  "type": "element:update",
+  "projectId": "project-123",
+  "pageId": "page-456",
+  "userId": "user-abc",
+  "timestamp": 1680000010100,
+  "seq": 42,
+  "clientOpId": "op-7f3a",
+  "payload": { "id": "uuid-1111", "styles": { "color": "blue" } }
+}
+```
+
+Client rules:
+
+- Send an optional `clientOpId` (unique per client) on each `element:*` request. The sender receives its own broadcast with the same `clientOpId` and `seq`: that echo is the acknowledgement (drop the pending optimistic op, do not apply it twice).
+- Apply operations in `seq` order. Ignore any op with `seq <=` the last applied `seq` (this includes ops already contained in a `sync:page` snapshot). Buffer an op that arrives with a gap and, if the missing `seq` does not arrive shortly, send `sync:page` to resynchronise. A `seq` that goes backwards or resets (for example after a long idle period) must also trigger a resync.
+- On failure the server does not broadcast and does not consume a `seq`. The sender receives an `error` message carrying the same `clientOpId` (on the envelope and in the payload) so the optimistic op can be rolled back.
+- If the server cannot guarantee delivery to a client (its send buffer or the room's queue overflows) it logs this and closes that connection instead of silently dropping a message. Reconnect, `join` and continue from the `seq` in `sync:page`.
 
 ### Error Report
 
@@ -334,7 +488,8 @@ Sent when an operation fails validation or encounters a system error.
 ```json
 {
   "code": "VALIDATION_ERROR | NOT_FOUND | JOIN_REQUIRED",
-  "message": "Detailed error description"
+  "message": "Detailed error description",
+  "clientOpId": "op-7f3a (only if the failed request carried one)"
 }
 ```
 
