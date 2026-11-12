@@ -38,7 +38,7 @@ func (uc *documentUseCase) GetDocument(ctx context.Context, projectID string, pa
 	// Build hierarchical tree from flat elements before caching/returning.
 	tree := elementutils.BuildElementTree(elements)
 
-	if err := uc.repo.DocumentRepo.SetDocument(ctx, projectID, pageID, tree); err != nil {
+	if err := uc.repo.DocumentRepo.SetDocumentIfAbsent(ctx, projectID, pageID, tree); err != nil {
 		fmt.Printf("failed to update cache: %v\n", err)
 	}
 
@@ -62,7 +62,8 @@ func (uc *documentUseCase) RefreshCache(ctx context.Context, projectID string, p
 	// Cache a hierarchical tree (not a flat list) so consumers get nested children directly.
 	tree := elementutils.BuildElementTree(elements)
 
-	if err := uc.repo.DocumentRepo.SetDocument(ctx, projectID, pageID, tree); err != nil {
+	// SET NX: never overwrite a document a concurrent mutation may have just written.
+	if err := uc.repo.DocumentRepo.SetDocumentIfAbsent(ctx, projectID, pageID, tree); err != nil {
 		return fmt.Errorf("failed to refresh cache: %w", err)
 	}
 
@@ -74,4 +75,19 @@ func (uc *documentUseCase) AddElementsToDocument(ctx context.Context, projectID 
 		return fmt.Errorf("failed to set document elements in cache: %w", err)
 	}
 	return nil
+}
+
+func (uc *documentUseCase) GetDocumentWithSeq(ctx context.Context, projectID string, pageID string) ([]domainEntity.Element, int64, error) {
+	return uc.repo.DocumentRepo.GetDocumentWithSeq(ctx, projectID, pageID)
+}
+
+func (uc *documentUseCase) MutateDocument(ctx context.Context, projectID string, pageID string, mutate domainRepo.DocumentMutateFunc) (int64, error) {
+	load := func(ctx context.Context) ([]domainEntity.Element, error) {
+		elements, err := uc.repo.ElementRepo.GetElementsByPageID(ctx, projectID, pageID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch page elements from db: %w", err)
+		}
+		return elementutils.BuildElementTree(elements), nil
+	}
+	return uc.repo.DocumentRepo.UpdateDocument(ctx, projectID, pageID, load, mutate)
 }

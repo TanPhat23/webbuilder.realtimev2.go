@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"time"
 
 	domainEntity "webbuilder/internal/domain/entity"
 	"webbuilder/internal/utils/logger"
@@ -14,6 +15,9 @@ import (
 )
 
 const redisChannelPrefix = "ws:room:"
+
+// broadcastEnqueueTimeout bounds how long localBroadcast waits for a full room queue to drain.
+const broadcastEnqueueTimeout = 2 * time.Second
 
 // serverID uniquely identifies this application instance to avoid message loops in Pub/Sub
 var serverID = uuid.NewString()
@@ -190,12 +194,30 @@ func (h *Hub) localBroadcast(roomID string, msg domainEntity.Message, sender *Cl
 	r := h.rooms[roomID]
 	h.mu.RUnlock()
 
-	if r != nil {
-		select {
-		case r.broadcast <- roomBroadcast{message: msg, sender: sender}:
-		default:
-			h.logger.Infof("room %s broadcast channel full, dropping message", roomID)
+	if r == nil {
+		return
+	}
+
+	rb := roomBroadcast{message: msg, sender: sender}
+	select {
+	case r.broadcast <- rb:
+		return
+	default:
+	}
+
+	// The room queue is full. Wait briefly for the room loop to drain it; if it still cannot
+	// accept the message, do not drop it invisibly: log and disconnect the room's clients so
+	// they reconnect and resync from the authoritative snapshot.
+	timer := time.NewTimer(broadcastEnqueueTimeout)
+	defer timer.Stop()
+	select {
+	case r.broadcast <- rb:
+	case <-r.ctx.Done():
+	case <-timer.C:
+		if h.logger != nil {
+			h.logger.Errorf("room %s broadcast queue full for %s, closing room clients to force resync (type=%s seq=%d)", roomID, broadcastEnqueueTimeout, msg.Type, msg.Seq)
 		}
+		r.closeAllClients()
 	}
 }
 

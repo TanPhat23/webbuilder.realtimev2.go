@@ -1,60 +1,53 @@
 # WebSocket API Reference
 
-This document describes the WebSocket protocol used by the Web Builder real-time engine for collaborative page editing, presence updates, and state synchronization.
-
-It is aligned with the system architecture and README:
-
-- The server exposes a project-scoped WebSocket endpoint.
-- Clients must join a page context before performing document operations.
-- The server is authoritative for persisted document state.
-- Synchronization is optimized around granular element updates rather than full-document writes.
-- Failed operations are returned as structured `error` messages.
+This document provides a detailed reference for the WebSocket API used in the Web Builder real-time synchronization system.
 
 ## 1. Connection
 
-The WebSocket endpoint is scoped by project.
+The WebSocket endpoint is dynamic based on the project ID.
 
-- **URL:** `ws://<host>:<port>/ws/:projectId`
-- **Protocol:** JSON messages over WebSocket
+- **URL:** `ws://<host>:<port>/ws/:project`
+- **Protocol:** `json`
 
-Example:
+Example: `ws://localhost:8080/ws/my-project-id`
 
-`ws://localhost:8080/ws/my-project-id`
+Authentication note:
 
-### Authentication
+- The server expects an Authorization header on the WebSocket upgrade request (for example: `Authorization: Bearer <token>`). Node clients (e.g., `ws`) can send headers on the handshake.
+- Note: Browsers' native WebSocket API cannot set arbitrary request headers on the initial handshake. For browser-based clients, pass the token in a query parameter (for example: `wss://host/ws/my-project-id?token=<jwt>`) or use cookies and ensure the server reads the token from the query string or cookie during the upgrade.
+- Example (Node `ws` client):
 
-Authentication is performed during the WebSocket upgrade request.
-
-- Server-side or Node.js clients can send an `Authorization` header.
-- Browser clients cannot set arbitrary headers in the native WebSocket constructor.
-- For browser clients, use a secure query parameter or cookie-based authentication if the server is configured to read it during upgrade.
-
-Node.js example:
-
-```/dev/null/ws-node-example.js#L1-4
+```js
 const WebSocket = require('ws');
 const ws = new WebSocket('ws://localhost:8080/ws/my-project-id', {
   headers: { Authorization: 'Bearer <token>' },
 });
 ```
 
+---
+
 ## 2. Message Envelope
 
-All client-to-server and server-to-client messages use the same JSON envelope.
+All communication (incoming and outgoing) uses a standard envelope:
 
-| Field       | Type     | Required                       | Description                                                                           |
-| :---------- | :------- | :----------------------------- | :------------------------------------------------------------------------------------ |
-| `type`      | `string` | Yes                            | Message type such as `join`, `presence`, or `element:update`                          |
-| `projectId` | `string` | Yes                            | Project identifier                                                                    |
-| `pageId`    | `string` | Yes for page-scoped operations | Page identifier                                                                       |
-| `userId`    | `string` | Recommended                    | Acting user identifier                                                                |
-| `requestId` | `string` | Optional                       | Client-generated correlation ID for matching optimistic actions with server responses |
-| `timestamp` | `int64`  | Yes                            | Unix timestamp in milliseconds                                                        |
-| `payload`   | `object` | Yes                            | Message-specific data                                                                 |
+The envelope includes the following fields:
 
-Example:
+| Field       | Type     | Description                                                                              |
+| :---------- | :------- | :--------------------------------------------------------------------------------------- |
+| `type`      | `string` | The action type (e.g., `element:update`)                                                 |
+| `projectId` | `string` | ID of the project                                                                        |
+| `pageId`    | `string` | ID of the page                                                                           |
+| `userId`    | `string` | ID of the acting user (optional but recommended)                                         |
+| `requestId` | `string` | Optional client-generated ID to correlate request/response (useful for acknowledgements) |
+| `timestamp` | `int64`  | Unix milliseconds                                                                        |
+| `payload`   | `object` | Action-specific data                                                                     |
+| `clientOpId` | `string` | Optional client-generated operation id on `element:*` requests. Echoed on the resulting broadcast and on `error` replies (see [Ordering and acknowledgements](#ordering-and-acknowledgements)). |
+| `requestId` | `string` | Optional client-generated request id. Echoed on the reply to that request: the `element:*` broadcast, the `sync:page` / `sync:project` response, or an `error`. |
+| `seq`       | `int64`  | Server-assigned, per-page sequence number. Present only on `element:create/update/move/delete` broadcasts. |
 
-```/dev/null/websocket-envelope.json#L1-16
+Example envelope (client -> server):
+
+```json
 {
   "type": "element:create",
   "projectId": "project-123",
@@ -67,126 +60,58 @@ Example:
       "type": "text",
       "settings": { "content": "Hello World" },
       "styles": { "color": "black" },
-      "order": 0,
-      "parentId": null
+      "order": 0
     }
   }
 }
 ```
 
-## 3. Message Types Overview
+On success, the server will broadcast an `element:create` message to all clients in the room (including the sender) including server-assigned fields (e.g., `id`, `createdAt`, `createdBy`) and may include the original `requestId` for correlation.
 
-### Presence and Connection
+---
 
-- `join`: Enter a page context and trigger an initial sync
-- `leave`: Exit a page context
-- `presence`: Broadcast cursor position or current selection
+## 3. Client to Server Messages
 
-### Document Operations
+### Join Page
 
-- `element:create`: Create a new element
-- `element:update`: Apply a partial update to an existing element
-- `element:move`: Reorder or reparent an element
-- `element:delete`: Remove an element
+Must be sent before performing any element operations.
 
-### Synchronization and Errors
+- **Type:** `join`
+- **Payload:**
 
-- `sync`: Request or receive the authoritative page snapshot
-- `error`: Report validation or processing failures
-
-## 4. Client to Server Messages
-
-## 4.1 `join`
-
-Clients should send `join` before any page-level collaborative operations.
-
-### Purpose
-
-- Associates the connection with a page
-- Enables the server to send the current authoritative state
-- Establishes the context for later element operations and presence updates
-
-### Payload
-
-```/dev/null/join-payload.json#L1-3
+```json
 {
-  "pageId": "page-456"
+  "pageId": "string"
 }
 ```
 
-### Example
+_Note: Upon joining, the server will automatically respond with a `sync` message containing the current page state._
 
-```/dev/null/join-message.json#L1-9
+### Presence (Cursor/Selection)
+
+Broadcasts your current activity to other users.
+
+- **Type:** `presence`
+- **Payload:**
+
+```json
 {
-  "type": "join",
-  "projectId": "project-123",
-  "pageId": "page-456",
-  "userId": "user-abc",
-  "timestamp": 1680000000000,
-  "payload": {
-    "pageId": "page-456"
-  }
-}
-```
-
-### Behavior
-
-- A successful `join` typically results in a server `sync` message.
-- If the page or project cannot be resolved, the server returns `error`.
-
-## 4.2 `leave`
-
-Clients can explicitly leave the current page context.
-
-### Payload
-
-`leave` typically does not require additional payload fields.
-
-```/dev/null/leave-message.json#L1-7
-{
-  "type": "leave",
-  "projectId": "project-123",
-  "pageId": "page-456",
-  "userId": "user-abc",
-  "timestamp": 1680000005000,
-  "payload": {}
-}
-```
-
-### Behavior
-
-- The server removes the client from the active page context.
-- Presence associated with the connection should be cleared.
-
-## 4.3 `presence`
-
-Presence messages broadcast ephemeral collaboration state such as cursor position or selected element.
-
-### Payload
-
-```/dev/null/presence-payload.json#L1-8
-{
-  "userId": "user-abc",
-  "userName": "Alice",
+  "userId": "string",
+  "userName": "string",
   "cursorX": 0.5,
   "cursorY": 0.8,
-  "elementId": "uuid-string",
+  "elementId": "uuid-string (optional)",
   "meta": {}
 }
 ```
 
-### Notes
+### Create Element
 
-- Presence is transient and should not be treated as persisted document state.
-- The server may rebroadcast presence updates to other participants on the same page.
+- **Type:** `element:create`
 
-## 4.4 `element:create`
+- **Client Payload Example:**
 
-Creates a new element in the current page.
-
-### Client Example
-
-```/dev/null/element-create-client.json#L1-17
+```json
 {
   "type": "element:create",
   "projectId": "project-123",
@@ -206,21 +131,14 @@ Creates a new element in the current page.
 }
 ```
 
-### Behavior
+- **Server Broadcast Example (after persistence):**
 
-- The server validates the payload.
-- The server persists the new element.
-- The server broadcasts the authoritative created element, including server-assigned fields such as `id`, `createdAt`, and `createdBy`.
-
-### Server Broadcast Example
-
-```/dev/null/element-create-server.json#L1-19
+```json
 {
   "type": "element:create",
   "projectId": "project-123",
   "pageId": "page-456",
   "userId": "system",
-  "requestId": "req-1",
   "timestamp": 1680000001000,
   "payload": {
     "element": {
@@ -237,13 +155,20 @@ Creates a new element in the current page.
 }
 ```
 
-## 4.5 `element:update`
+Notes:
 
-Applies a partial update to an existing element.
+- The server is authoritative — clients should reconcile optimistic client updates with server broadcasts using `requestId` and the assigned `id`.
+- If creation fails validation, the server will return an `error` message referencing the original `requestId` when available.
 
-### Client Example
+### Update Element (Partial)
 
-```/dev/null/element-update-client.json#L1-14
+Updates only the provided fields (patch semantics).
+
+- **Type:** `element:update`
+
+- **Client Payload Example:**
+
+```json
 {
   "type": "element:update",
   "projectId": "project-123",
@@ -259,24 +184,40 @@ Applies a partial update to an existing element.
 }
 ```
 
-### Behavior
+- **Server Broadcast Example (merged patch):**
 
-- Only provided fields are updated.
-- The server merges the patch into the authoritative stored element.
-- Clients should treat the server broadcast as the source of truth.
+```json
+{
+  "type": "element:update",
+  "projectId": "project-123",
+  "pageId": "page-456",
+  "userId": "user-abc",
+  "timestamp": 1680000010100,
+  "payload": {
+    "id": "uuid-1111",
+    "settings": { "content": "Hello Universe" },
+    "styles": { "color": "blue" }
+  }
+}
+```
 
-### Notes
+Notes:
 
-- This protocol is intentionally patch-oriented to minimize network overhead.
-- Conflict handling is resolved server-side.
+- Updates are **merged**, never replaced:
+  - `styles` and `settings` are deep-merged into the stored maps. A key whose value is JSON `null` is deleted. Nested objects are merged recursively; arrays and scalars replace the stored value.
+  - `properties` set the element's own fields. Supported keys: `name`, `content`, `href`, `src`, `tailwindStyles` (string or `null`) and `isLocked` (boolean). Unknown keys or wrongly typed values are rejected with `VALIDATION_ERROR`. Properties are never written into `settings`.
+  - For compatibility with the web client, `name`, `content`, `src`, `href` and `tailwindStyles` are also accepted as top-level payload fields; they are equivalent to the same keys in `properties` (an explicit `properties` entry wins).
+- The server merges partial updates into the stored element; the broadcasted message is authoritative.
+- Conflict resolution is handled server-side (e.g., timestamp-based LWW or optimistic locking); clients should apply server broadcasts as source of truth.
 
-## 4.6 `element:move`
+### Move Element
 
-Moves an element by changing its order, parent, or both.
+Reparents or reorders an element.
 
-### Payload
+- **Type:** `element:move`
+- **Payload (client -> server):**
 
-```/dev/null/element-move-payload.json#L1-5
+```json
 {
   "id": "uuid-string",
   "parentId": "uuid-string or null",
@@ -284,65 +225,87 @@ Moves an element by changing its order, parent, or both.
 }
 ```
 
-### Behavior
+`order` is the target index among the new parent's children. The server allocates the element's `orderKey` (see below) and ignores any `orderKey` sent by the client.
 
-- Use this message when reordering siblings or reparenting an element in the hierarchy.
-- The server validates the requested destination and broadcasts the authoritative result.
+- **Payload (server broadcast):** the same fields, with `order`, `orderKey` and `parentId` set to the values the server actually applied:
 
-## 4.7 `element:delete`
+```json
+{
+  "id": "uuid-string",
+  "parentId": "uuid-string or null",
+  "order": 3,
+  "orderKey": "a1V"
+}
+```
 
-Deletes an element from the page.
+#### Order keys
 
-### Payload
+Siblings are ordered by `orderKey`, a string fractional index (`roci.dev/fracdex`). Compare keys as plain strings; a lexicographically smaller key sorts first. Inserting or moving an element only assigns a key between its two new neighbours, so other siblings are never renumbered. Every element in `element:create` broadcasts and `sync:page` snapshots carries `orderKey`. The integer `order` is kept for compatibility and always equals the element's index among its siblings. It is derived from `orderKey`, so clients should sort by `orderKey` and use `order` only as a fallback for elements that have no key. When a document has missing, duplicate or out-of-order keys, the server repairs them on the next edit while keeping the existing sibling order.
 
-```/dev/null/element-delete-payload.json#L1-3
+### Delete Element
+
+- **Type:** `element:delete`
+- **Payload:**
+
+```json
 {
   "id": "uuid-string"
 }
 ```
 
-### Behavior
+### Sync Page Request
 
-- The server removes the element if it exists and the request is valid.
-- The resulting broadcast informs other participants to remove the element locally.
+Force a refresh of the current page state.
 
-## 4.8 `sync`
+- **Type:** `sync:page`
+- **Payload:** Empty
 
-Requests a fresh snapshot of the current page state.
-
-### Client Request
-
-```/dev/null/sync-request.json#L1-7
+Example:
+```json
 {
-  "type": "sync",
+  "type": "sync:page",
   "projectId": "project-123",
   "pageId": "page-456",
   "userId": "user-abc",
+  "requestId": "req-sync-1",
   "timestamp": 1680000020000,
   "payload": {}
 }
 ```
 
-### Behavior
+### Sync Project Request
 
-- Clients can request `sync` after reconnecting or when local state is suspected to be stale.
-- The response is a full authoritative page snapshot.
+Force a refresh of the entire project state (all pages, workflows, element workflows).
 
-## 5. Server to Client Messages
+- **Type:** `sync:project`
+- **Payload:** Empty
 
-## 5.1 `sync`
+Example:
+```json
+{
+  "type": "sync:project",
+  "projectId": "project-123",
+  "userId": "user-abc",
+  "requestId": "req-sync-proj-1",
+  "timestamp": 1680000020000,
+  "payload": {}
+}
+```
 
-The `sync` message provides the current authoritative state for a page.
+Note: Project-wide sync does not require a `pageId` and returns state for all pages in the project.
 
-It is typically sent:
+---
 
-- after a successful `join`
-- after an explicit client `sync` request
-- after reconnect flows where the client needs a fresh snapshot
+## 4. Server to Client Messages
 
-### Payload
+### Initial Page State Sync
 
-```/dev/null/sync-response.json#L1-23
+Sent automatically after a successful `join` or requested via `sync:page`. This message contains the authoritative document snapshot for the current page and the presence information for active users.
+
+- **Type:** `sync:page`
+- **Payload:**
+
+```json
 {
   "elements": [
     {
@@ -366,84 +329,194 @@ It is typically sent:
         "elementId": null
       }
     }
+  ],
+  "seq": 41
+}
+```
+
+`seq` is the page's current sequence number (0 if no operation has been applied yet). The `elements` snapshot already contains every operation with `seq <= payload.seq`; the next operation to apply is `seq + 1`.
+
+Server Response Example (with requestId correlation):
+```json
+{
+  "type": "sync:page",
+  "projectId": "project-123",
+  "pageId": "page-456",
+  "userId": "system",
+  "requestId": "req-sync-1",
+  "timestamp": 1680000020100,
+  "payload": {
+    "elements": [...],
+    "users": [...]
+  }
+}
+```
+
+### Project State Sync
+
+Sent in response to a `sync:project` request. This message contains the authoritative state for the entire project, including all pages, workflows, and element workflows.
+
+- **Type:** `sync:project`
+- **Payload:**
+
+```json
+{
+  "elements": [
+    {
+      "id": "uuid-1111",
+      "type": "text",
+      "settings": { "content": "Hello World" },
+      "styles": { "fontSize": 14, "color": "black" },
+      "order": 0,
+      "parentId": null,
+      "createdAt": 1680000001000,
+      "createdBy": "user-abc"
+    }
+  ],
+  "workflows": [
+    {
+      "id": "workflow-1",
+      "name": "Main Workflow",
+      "createdAt": 1680000001000,
+      "createdBy": "user-abc"
+    }
+  ],
+  "elementWorkflows": [
+    {
+      "id": "elem-workflow-1",
+      "elementId": "uuid-1111",
+      "workflowId": "workflow-1"
+    }
+  ],
+  "users": [
+    {
+      "userId": "user-abc",
+      "userName": "Alice",
+      "presence": {
+        "cursorX": 0.5,
+        "cursorY": 0.2,
+        "elementId": null
+      }
+    }
   ]
 }
 ```
 
-### Notes
-
-- `elements` represents the current page document snapshot.
-- `users` represents active collaborators and their latest known presence state.
-- Clients should replace or reconcile local state using this payload as authoritative.
-
-## 5.2 Broadcasted document operations
-
-When a user performs a successful document operation, the server broadcasts the corresponding message type to other participants in the same page context.
-
-Common broadcast types:
-
-- `element:create`
-- `element:update`
-- `element:move`
-- `element:delete`
-- `presence`
-
-These broadcasts are the authoritative stream of collaborative changes.
-
-## 5.3 `error`
-
-The server sends `error` when a message fails validation, cannot be processed, or references missing resources.
-
-### Payload
-
-```/dev/null/error-payload.json#L1-4
+Server Response Example (with requestId correlation):
+```json
 {
-  "code": "VALIDATION_ERROR",
-  "message": "Detailed error description"
+  "type": "sync:project",
+  "projectId": "project-123",
+  "userId": "system",
+  "requestId": "req-sync-proj-1",
+  "timestamp": 1680000020100,
+  "payload": {
+    "elements": [...],
+    "workflows": [...],
+    "elementWorkflows": [...],
+    "users": [...]
+  }
 }
 ```
 
-If available, the server may also include the original `requestId` in the outer envelope so the client can map the failure back to an optimistic action.
+Client Snippets (JavaScript):
 
-## 6. Standard Error Codes
+```javascript
+const ws = new WebSocket('ws://localhost:8080/ws/my-project-id');
 
-| Code               | Description                                                        |
-| :----------------- | :----------------------------------------------------------------- |
-| `VALIDATION_ERROR` | The payload failed schema or business validation                   |
-| `NOT_FOUND`        | The requested project, page, or element does not exist             |
-| `JOIN_REQUIRED`    | The client attempted a page-scoped operation before sending `join` |
-| `PROCESS_ERROR`    | An internal processing error occurred                              |
+ws.addEventListener('open', () => {
+  // join the page (must be done before element ops)
+  ws.send(
+    JSON.stringify({
+      type: 'join',
+      projectId: 'my-project-id',
+      pageId: 'page-1',
+      userId: 'user-1',
+      timestamp: Date.now(),
+      payload: { pageId: 'page-1' },
+    })
+  );
+});
 
-## 7. Client Integration Notes
+ws.addEventListener('message', (ev) => {
+  const msg = JSON.parse(ev.data);
+  switch (msg.type) {
+    case 'sync:page':
+      // replace local page document with msg.payload.elements
+      break;
+    case 'sync:project':
+      // replace entire project state with elements, workflows, and elementWorkflows
+      break;
+    case 'element:create':
+      // insert element
+      break;
+    case 'element:update':
+      // apply patch
+      break;
+    case 'error':
+      // handle errors
+      break;
+  }
+});
+```
 
-## 7.1 Reconnection
+Reconnection guidance:
 
-Clients should implement reconnection using exponential backoff with jitter.
+- Use exponential backoff with jitter (e.g., base 500ms, multiplier 1.5, max 30s).
+- On reconnect, re-send `join` (with same `userId`) and request a `sync:page` if needed.
+- Use `requestId` and message `timestamp`/server-assigned `id` to deduplicate and reconcile missed messages.
+- Apply server-sent `sync:page` as authoritative snapshot; reconcile client optimistic updates by matching `requestId` or element IDs.
 
-Recommended behavior:
+### Broadcasted Operations
 
-- retry with a bounded backoff window
-- re-establish the WebSocket connection
-- re-send `join` for the active page
-- request `sync` if necessary
-- reconcile optimistic local state against authoritative server messages
+When a user performs an element action (create, update, delete, move), the server applies it and broadcasts the same message type and payload to **all** participants in the room, **including the sender**. Presence, comment and workflow messages are unchanged (presence is still not echoed to its sender and carries no `seq`).
 
-## 7.2 Optimistic UI
+#### Ordering and acknowledgements
 
-For a responsive collaborative experience:
+Every successful `element:create/update/move/delete` gets the next per-page `seq` (1, 2, 3, ...), assigned atomically with the change in Redis, so it is consistent across server instances. The broadcast envelope carries it:
 
-- generate a client-side `requestId` for mutating operations
-- apply an optimistic local update if needed
-- reconcile using the server broadcast
-- prefer server-assigned IDs and timestamps over local assumptions
+```json
+{
+  "type": "element:update",
+  "projectId": "project-123",
+  "pageId": "page-456",
+  "userId": "user-abc",
+  "timestamp": 1680000010100,
+  "seq": 42,
+  "clientOpId": "op-7f3a",
+  "payload": { "id": "uuid-1111", "styles": { "color": "blue" } }
+}
+```
 
-## 7.3 Source of Truth
+Client rules:
 
-The server is authoritative for:
+- Send an optional `clientOpId` (unique per client) on each `element:*` request. The sender receives its own broadcast with the same `clientOpId` and `seq`: that echo is the acknowledgement (drop the pending optimistic op, do not apply it twice).
+- Apply operations in `seq` order. Ignore any op with `seq <=` the last applied `seq` (this includes ops already contained in a `sync:page` snapshot). Buffer an op that arrives with a gap and, if the missing `seq` does not arrive shortly, send `sync:page` to resynchronise. A `seq` that goes backwards or resets (for example after a long idle period) must also trigger a resync.
+- On failure the server does not broadcast and does not consume a `seq`. The sender receives an `error` message carrying the same `clientOpId` (on the envelope and in the payload) so the optimistic op can be rolled back.
+- If the server cannot guarantee delivery to a client (its send buffer or the room's queue overflows) it logs this and closes that connection instead of silently dropping a message. Reconnect, `join` and continue from the `seq` in `sync:page`.
 
-- persisted element state
-- ordering and parent relationships
-- conflict resolution
-- the current synchronized page snapshot
+### Error Report
 
-Clients should always converge toward the state represented by `sync` and broadcasted server messages.
+Sent when an operation fails validation or encounters a system error.
+
+- **Type:** `error`
+- **Payload:**
+
+```json
+{
+  "code": "VALIDATION_ERROR | NOT_FOUND | JOIN_REQUIRED",
+  "message": "Detailed error description",
+  "clientOpId": "op-7f3a (only if the failed request carried one)"
+}
+```
+
+---
+
+## 5. Standard Error Codes
+
+| Code               | Description                                                 |
+| :----------------- | :---------------------------------------------------------- |
+| `VALIDATION_ERROR` | The payload data failed schema validation.                  |
+| `NOT_FOUND`        | The requested element or project does not exist.            |
+| `JOIN_REQUIRED`    | You attempted an operation before sending a `join` message. |
+| `PROCESS_ERROR`    | An internal error occurred while processing the request.    |

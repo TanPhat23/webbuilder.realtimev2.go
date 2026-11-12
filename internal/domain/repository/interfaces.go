@@ -6,6 +6,16 @@ import (
 	"webbuilder/internal/domain/entity"
 )
 
+// DocumentLoadFunc loads a page document from the source of truth (the database)
+// when it is not present in the cache.
+type DocumentLoadFunc func(ctx context.Context) ([]entity.Element, error)
+
+// DocumentMutateFunc transforms the current page document into its next version.
+// It may be invoked more than once for a single update (optimistic retries), so it
+// must derive its result only from the elements it receives. Returning an error
+// aborts the update: nothing is written and the page sequence is not advanced.
+type DocumentMutateFunc func(elements []entity.Element) ([]entity.Element, error)
+
 type ElementRepository interface {
 	CreateElement(ctx context.Context, projectID string, pageID string, element *entity.Element) error
 	CreateElements(ctx context.Context, projectID string, pageID string, element []entity.Element) error
@@ -28,6 +38,17 @@ type DocumentRepository interface {
 	SetDocument(ctx context.Context, projectID string, pageID string, elements []entity.Element) error
 	GetDocument(ctx context.Context, projectID string, pageID string) ([]entity.Element, error)
 	DeleteDocument(ctx context.Context, projectID string, pageID string) error
+
+	// SetDocumentIfAbsent populates the cache only when no document is cached yet, so a cache
+	// fill can never overwrite a concurrent mutation.
+	SetDocumentIfAbsent(ctx context.Context, projectID string, pageID string, elements []entity.Element) error
+	// GetDocumentWithSeq returns the cached document and the page sequence number as one
+	// consistent snapshot. The elements are nil on a cache miss; seq is 0 if the page has no ops.
+	GetDocumentWithSeq(ctx context.Context, projectID string, pageID string) ([]entity.Element, int64, error)
+	// UpdateDocument atomically applies mutate to the current document (loading it with load on a
+	// cache miss), stores the result, marks the page dirty and increments the per-page sequence
+	// number. It is safe across server instances. It returns the new sequence number.
+	UpdateDocument(ctx context.Context, projectID string, pageID string, load DocumentLoadFunc, mutate DocumentMutateFunc) (int64, error)
 
 	MarkPageDirty(ctx context.Context, projectID string, pageId string) error
 	PopDirtyPages(ctx context.Context, limit int) ([]entity.DirtyPage, error)

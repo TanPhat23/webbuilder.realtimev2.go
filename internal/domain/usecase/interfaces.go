@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"webbuilder/internal/domain/entity"
+	domainRepo "webbuilder/internal/domain/repository"
 )
 
 /*
@@ -13,22 +14,31 @@ public contract for implementations and to keep implementation files
 comment-free per your request.
 */
 type ElementUseCase interface {
+	// All mutating operations are applied atomically against the page document and return the
+	// per-page sequence number assigned to the change. On error nothing is written and the
+	// sequence number is not advanced.
+
 	// CreateElement creates a new element in the given project/page and refreshes the page cache.
-	CreateElement(ctx context.Context, projectID string, element *entity.Element) error
-	// UpdateElement updates an existing element and refreshes the page cache.
-	UpdateElement(ctx context.Context, projectID string, pageID string, element *entity.Element) error
-	// PatchElement applies granular updates to an element and refreshes the page cache.
-	PatchElement(ctx context.Context, projectID string, pageID string, elementID string, properties map[string]any, styles map[string]any, settings map[string]any) error
+	CreateElement(ctx context.Context, projectID string, element *entity.Element) (int64, error)
+	CreateElementAt(ctx context.Context, projectID string, element *entity.Element, position *int) (int64, error)
+	// UpdateElement replaces an existing element and refreshes the page cache.
+	UpdateElement(ctx context.Context, projectID string, pageID string, element *entity.Element) (int64, error)
+	// PatchElement merges granular updates into an element: styles and settings are deep-merged
+	// (a nil value deletes the key); properties set the matching element fields
+	// (name, content, href, src, tailwindStyles, isLocked).
+	PatchElement(ctx context.Context, projectID string, pageID string, elementID string, properties map[string]any, styles map[string]any, settings map[string]any) (int64, error)
 	// RemoveElement deletes an element and refreshes the page cache.
-	RemoveElement(ctx context.Context, projectID string, pageID string, elementID string) error
+	RemoveElement(ctx context.Context, projectID string, pageID string, elementID string) (int64, error)
 	// MoveElement moves the element under a new parent at the given index and refreshes the page cache.
-	MoveElement(ctx context.Context, projectID string, pageID string, elementID string, parentID string, index int) (*entity.Element, error)
+	MoveElement(ctx context.Context, projectID string, pageID string, elementID string, parentID string, index int) (*entity.Element, int64, error)
 	// GetElementsByPageID returns all elements that belong to the specified page.
 	GetElementsByPageID(ctx context.Context, projectID string, pageID string) ([]entity.Element, error)
 	// GetElementsByProjectID returns all elements across the specified project.
 	GetElementsByProjectID(ctx context.Context, projectID string) ([]entity.Element, error)
 	// SyncPage forces a refresh of the page cache from the DB and returns the latest elements.
 	SyncPage(ctx context.Context, projectID string, pageID string) ([]entity.Element, error)
+	// SyncPageWithSeq is SyncPage that also returns the page sequence number matching the returned elements.
+	SyncPageWithSeq(ctx context.Context, projectID string, pageID string) ([]entity.Element, int64, error)
 }
 
 /*
@@ -42,7 +52,12 @@ type DocumentUseCase interface {
 	GetDocument(ctx context.Context, projectID string, pageID string) ([]entity.Element, error)
 	// RefreshCache fetches elements for a page from the DB and updates the cache.
 	RefreshCache(ctx context.Context, projectID string, pageID string) error
+	// GetDocumentWithSeq returns the cached document together with its page sequence number (consistent snapshot).
+	GetDocumentWithSeq(ctx context.Context, projectID string, pageID string) ([]entity.Element, int64, error)
+	// MutateDocument atomically applies mutate to the page document and returns the new page sequence number.
+	MutateDocument(ctx context.Context, projectID string, pageID string, mutate domainRepo.DocumentMutateFunc) (int64, error)
 	// AddElementsToDocument sets the cached snapshot for the given page.
+	// It is not safe for read-modify-write; use MutateDocument for that.
 	AddElementsToDocument(ctx context.Context, projectID string, pageID string, elements []entity.Element) error
 }
 

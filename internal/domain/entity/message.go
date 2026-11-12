@@ -37,7 +37,7 @@ const (
 	TypeElementWorkflowDelete MessageType = "element-workflow:delete"
 
 	// Synchronization
-	TypeSync        MessageType = "sync:page"         // Initial state request/response
+	TypeSync        MessageType = "sync:page"    // Initial state request/response
 	TypeSyncProject MessageType = "sync:project" // Project-wide sync
 	TypeSnapshot    MessageType = "snapshot"     // Save/Load full state
 	TypeError       MessageType = "error"        // Server-side error reporting
@@ -51,6 +51,18 @@ type Message struct {
 	UserID    string          `json:"userId,omitempty"`
 	Timestamp int64           `json:"timestamp"`
 	Payload   json.RawMessage `json:"payload,omitempty"`
+
+	// ClientOpID is an optional client-generated operation id. Clients may set it on element
+	// operations; the server echoes it on the resulting broadcast (the sender's ack) and on
+	// error replies so the client can match them to the pending operation.
+	ClientOpID string `json:"clientOpId,omitempty"`
+	// RequestID is an optional client-generated request id. The server echoes it on the reply
+	// to that request (the element broadcast, the sync response, or an error) so the client can
+	// resolve its pending request.
+	RequestID string `json:"requestId,omitempty"`
+	// Seq is the per-page, strictly increasing sequence number assigned by the server to
+	// element:create/update/move/delete broadcasts. Zero (omitted) for all other messages.
+	Seq int64 `json:"seq,omitempty"`
 }
 
 type PayloadSyncProject struct {
@@ -72,15 +84,26 @@ type PayloadPresence struct {
 
 // PayloadElementCreate used when a new component is dragged onto the canvas
 type PayloadElementCreate struct {
-	Element Element `json:"element"`
+	Element  Element `json:"element"`
+	Position *int    `json:"position,omitempty"`
 }
 
 // PayloadElementUpdate for granular patches to avoid sending the whole object
+//
+// Semantics are merge, not replace: Styles and Settings are deep-merged into the stored maps
+// (a null value deletes the key). Properties set the element's own fields (name, content,
+// href, src, tailwindStyles, isLocked). The top-level Name/Content/Src/Href/TailwindStyles
+// fields are the form the web client sends and are equivalent to the same keys in Properties.
 type PayloadElementUpdate struct {
-	ID         string         `json:"id"`
-	Properties map[string]any `json:"properties,omitempty"`
-	Styles     map[string]any `json:"styles,omitempty"`
-	Settings   map[string]any `json:"settings,omitempty"`
+	ID             string         `json:"id"`
+	Properties     map[string]any `json:"properties,omitempty"`
+	Styles         map[string]any `json:"styles,omitempty"`
+	Settings       map[string]any `json:"settings,omitempty"`
+	Name           *string        `json:"name,omitempty"`
+	Content        *string        `json:"content,omitempty"`
+	Src            *string        `json:"src,omitempty"`
+	Href           *string        `json:"href,omitempty"`
+	TailwindStyles *string        `json:"tailwindStyles,omitempty"`
 }
 
 // PayloadElementMove for drag-and-drop reordering
@@ -88,6 +111,7 @@ type PayloadElementMove struct {
 	ID       string  `json:"id"`
 	ParentID *string `json:"parentId"` // Null if root
 	Order    int     `json:"order"`
+	OrderKey string  `json:"orderKey,omitempty"`
 }
 
 // PayloadElementDelete
@@ -132,6 +156,9 @@ type PayloadSync struct {
 	Elements         []Element              `json:"elements"`
 	ElementWorkflows []ElementEventWorkflow `json:"elementWorkflows,omitempty"`
 	Users            []UserPresence         `json:"users"`
+	// Seq is the page's current sequence number at the time of the snapshot (0 if no ops yet).
+	// Element ops with seq <= Seq are already contained in Elements.
+	Seq int64 `json:"seq"`
 }
 
 // PayloadSnapshot allows the client to request a forced save to DB
@@ -144,6 +171,8 @@ type PayloadSnapshot struct {
 type PayloadError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// ClientOpID echoes the failed operation's clientOpId, when the client supplied one.
+	ClientOpID string `json:"clientOpId,omitempty"`
 }
 
 // Presence represents cursor/selection state for a user in a sync message.
@@ -155,11 +184,12 @@ type Presence struct {
 
 // UserPresence represents a synchronized user for `sync:page` payloads.
 // Matches the client-side SyncUser interface shape:
-// {
-//   userId: string;
-//   userName: string;
-//   presence: { cursorX:number, cursorY:number, elementId?: string | null }
-// }
+//
+//	{
+//	  userId: string;
+//	  userName: string;
+//	  presence: { cursorX:number, cursorY:number, elementId?: string | null }
+//	}
 type UserPresence struct {
 	UserID   string   `json:"userId"`
 	UserName string   `json:"userName"`

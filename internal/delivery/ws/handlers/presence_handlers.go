@@ -24,14 +24,15 @@ func (h *Handler) handleJoin(ctx context.Context, client *wsentity.Client, msg d
 		return err
 	}
 
-	elements, err := h.uc.Element.SyncPage(ctx, client.ProjectID, client.PageID)
+	elements, seq, err := h.uc.Element.SyncPageWithSeq(ctx, client.ProjectID, client.PageID)
 	if err != nil {
 		return err
 	}
 	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByPage(ctx, client.ProjectID, client.PageID)
 
 	users := h.hub.GetRoomParticipants(client.RoomID())
-	syncMsg, _ := client.Factory().SyncPage(elements, elementWorkflows, users)
+	syncMsg, _ := client.Factory().SyncPageAt(elements, elementWorkflows, users, seq)
+	syncMsg.RequestID = msg.RequestID
 	_ = client.Send(syncMsg)
 
 	projElements, _ := h.uc.Element.GetElementsByProjectID(ctx, client.ProjectID)
@@ -45,6 +46,7 @@ func (h *Handler) handleJoin(ctx context.Context, client *wsentity.Client, msg d
 	// other clients already have it and will receive granular updates via element/workflow
 	// operation broadcasts.
 	syncProjMsg, _ := client.Factory().SyncProject(projElements, projWorkflows, projElementWorkflows, nil)
+	syncProjMsg.RequestID = msg.RequestID
 	_ = client.Send(syncProjMsg)
 
 	return nil
@@ -78,7 +80,7 @@ func (h *Handler) handleSync(ctx context.Context, client *wsentity.Client, msg d
 		return domainErrors.ErrNotJoined
 	}
 
-	elements, err := h.uc.Element.SyncPage(ctx, client.ProjectID, client.PageID)
+	elements, seq, err := h.uc.Element.SyncPageWithSeq(ctx, client.ProjectID, client.PageID)
 	if err != nil {
 		return err
 	}
@@ -86,7 +88,8 @@ func (h *Handler) handleSync(ctx context.Context, client *wsentity.Client, msg d
 	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByPage(ctx, client.ProjectID, client.PageID)
 
 	users := h.hub.GetRoomParticipants(client.RoomID())
-	syncMsg, _ := client.Factory().SyncPage(elements, elementWorkflows, users)
+	syncMsg, _ := client.Factory().SyncPageAt(elements, elementWorkflows, users, seq)
+	syncMsg.RequestID = msg.RequestID
 	_ = client.Send(syncMsg)
 	return nil
 }
@@ -105,5 +108,6 @@ func (h *Handler) handleSyncProject(ctx context.Context, client *wsentity.Client
 		return err
 	}
 
+	syncMsg.RequestID = msg.RequestID
 	return client.Send(syncMsg)
 }

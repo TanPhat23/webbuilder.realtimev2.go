@@ -11,6 +11,7 @@ type Element struct {
 	Settings       map[string]any `json:"settings,omitempty" gorm:"column:Settings;serializer:json;type:jsonb"`
 	TailwindStyles *string        `json:"tailwindStyles,omitempty" gorm:"column:TailwindStyles;type:text"`
 	Order          int            `json:"order" gorm:"column:Order;default:0;index:idx_page_order,priority:2" validate:"gte=0"`
+	OrderKey       string         `json:"orderKey,omitempty" gorm:"column:OrderKey"`
 	IsLocked       bool           `json:"isLocked" gorm:"column:IsLocked;default:false"`
 	ParentID       *string        `json:"parentId,omitempty" gorm:"column:ParentId;index" validate:"omitempty,uuid"`
 	PageID         string         `json:"pageId" gorm:"column:PageId;index;index:idx_page_order,priority:1" validate:"required"`
