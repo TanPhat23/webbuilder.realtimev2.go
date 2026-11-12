@@ -215,7 +215,7 @@ Notes:
 Reparents or reorders an element.
 
 - **Type:** `element:move`
-- **Payload:**
+- **Payload (client -> server):**
 
 ```json
 {
@@ -224,6 +224,23 @@ Reparents or reorders an element.
   "order": 5
 }
 ```
+
+`order` is the target index among the new parent's children. The server allocates the element's `orderKey` (see below) and ignores any `orderKey` sent by the client.
+
+- **Payload (server broadcast):** the same fields, with `order`, `orderKey` and `parentId` set to the values the server actually applied:
+
+```json
+{
+  "id": "uuid-string",
+  "parentId": "uuid-string or null",
+  "order": 3,
+  "orderKey": "a1V"
+}
+```
+
+#### Order keys
+
+Siblings are ordered by `orderKey`, a string fractional index (`roci.dev/fracdex`). Compare keys as plain strings; a lexicographically smaller key sorts first. Inserting or moving an element only assigns a key between its two new neighbours, so other siblings are never renumbered. Every element in `element:create` broadcasts and `sync:page` snapshots carries `orderKey`. The integer `order` is kept for compatibility and always equals the element's index among its siblings. It is derived from `orderKey`, so clients should sort by `orderKey` and use `order` only as a fallback for elements that have no key. When a document has missing, duplicate or out-of-order keys, the server repairs them on the next edit while keeping the existing sibling order.
 
 ### Delete Element
 
