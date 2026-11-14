@@ -35,6 +35,11 @@ func AuthMiddleware(cfg *config.Config) fiber.Handler {
 			if devUserId == "" {
 				devUserId = "dev-user-id"
 			}
+			// Dev mode only: let a test client pick its identity, so several
+			// users can connect at once (a browser WebSocket can't set headers).
+			if override := c.Query("devUser", c.Get("X-Dev-User")); override != "" {
+				devUserId = override
+			}
 
 			logger.Default().Debugf("AuthMiddleware: DevMode active, using UserID: %s", devUserId)
 

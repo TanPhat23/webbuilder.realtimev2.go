@@ -133,3 +133,33 @@ See the [Architecture Documentation](./docs/architecture.md) for a deep dive int
 ## 📝 License
 
 This project is licensed under the MIT License.
+
+## Realtime schema compatibility
+
+The API owns the shared database tables. Before serving sockets, realtime startup
+checks for `Element.OrderKey` and adds it if missing, using the targeted migration:
+
+```sql
+ALTER TABLE "Element" ADD COLUMN IF NOT EXISTS "OrderKey" text NOT NULL DEFAULT '';
+```
+
+Existing elements and numeric ordering are preserved. Legacy rows get fractional
+keys when their page is loaded or mutated; persistence saves those keys along with
+`Order`. No other table definitions are migrated. Deploy this version of the
+realtime service to upgrade older databases before clients attempt to join pages.
+The initial upgrade needs permission to alter `Element`; installations using a
+restricted runtime role can run the SQL with their migration role first.
+
+Regression tests can use disposable PostgreSQL and Redis instances:
+
+```bash
+WEBBUILDER_TEST_DATABASE_URL='postgres://postgres:password@localhost:5432/postgres?sslmode=disable' \
+WEBBUILDER_TEST_REDIS_ADDR='localhost:6379' \
+go test ./... -count=1
+```
+
+PostgreSQL regressions create and drop unique test schemas. They verify legacy
+schema startup, repeat startup without data loss, order-key persistence, and a
+real WebSocket page join followed by acknowledged element creation and editing.
+The PostgreSQL and Redis integration tests skip when their respective variables
+are unset.

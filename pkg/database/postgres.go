@@ -54,5 +54,12 @@ func NewPostgresConnection(cfg Config) (*gorm.DB, error) {
 		return nil, err
 	}
 
+	if err := migrateRealtimeSchema(db); err != nil {
+		if sqlDB, dbErr := db.DB(); dbErr == nil {
+			_ = sqlDB.Close()
+		}
+		return nil, err
+	}
+
 	return db, nil
 }
