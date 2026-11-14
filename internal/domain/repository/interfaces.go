@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"webbuilder/internal/domain/logic"
 
 	"webbuilder/internal/domain/entity"
 )
@@ -78,7 +79,20 @@ type ElementWorkflowRepository interface {
 	GetElementWorkflowsByPageID(ctx context.Context, projectID string, pageID string) ([]entity.ElementEventWorkflow, error)
 }
 
+// LogicRepository stores the project's and pages' logic documents.
+type LogicRepository interface {
+	Move(ctx context.Context, projectID, pageID, userID, kind, name, to string) (project logic.Revisioned, page logic.Revisioned, err error)
+	// Apply merges patch into the project (pageID empty) or page logic after
+	// checking the user may edit, and returns the resulting document and its new revision.
+	Apply(ctx context.Context, projectID, pageID, userID string, patch map[string]any, nullPaths ...[][]string) (logic.Revisioned, error)
+	// Get returns the project and page documents and revisions after checking the user may read.
+	Get(ctx context.Context, projectID, pageID, userID string) (project logic.Revisioned, page logic.Revisioned, err error)
+	// Access reports whether the user may read and may edit the project.
+	Access(ctx context.Context, projectID, userID string) (read bool, write bool, err error)
+}
+
 type Repository struct {
+	LogicRepo           LogicRepository
 	ElementRepo         ElementRepository
 	SnapshotRepo        SnapshotRepository
 	DocumentRepo        DocumentRepository

@@ -36,6 +36,10 @@ const (
 	TypeElementWorkflowUpdate MessageType = "element-workflow:update"
 	TypeElementWorkflowDelete MessageType = "element-workflow:delete"
 
+	TypeLogicUpdate MessageType = "logic:update"
+	TypeLogicMove   MessageType = "logic:move"
+	TypeLogicSync   MessageType = "logic:sync"
+
 	// Synchronization
 	TypeSync        MessageType = "sync:page"    // Initial state request/response
 	TypeSyncProject MessageType = "sync:project" // Project-wide sync
@@ -159,6 +163,41 @@ type PayloadSync struct {
 	// Seq is the page's current sequence number at the time of the snapshot (0 if no ops yet).
 	// Element ops with seq <= Seq are already contained in Elements.
 	Seq int64 `json:"seq"`
+}
+
+// Logic scopes for logic:update.
+const (
+	LogicScopeProject = "project"
+	LogicScopePage    = "page"
+)
+
+// PayloadLogicUpdate is what a client sends: a merge patch (null deletes a key)
+// for the project's logic, or for the page named by the message's pageId.
+type PayloadLogicUpdate struct {
+	Scope     string         `json:"scope"`
+	Patch     map[string]any `json:"patch"`
+	NullPaths [][]string     `json:"nullPaths,omitempty"`
+}
+
+// PayloadLogicChanged is what the server broadcasts after a committed update:
+// the complete resulting document for the scope, so applying it is idempotent.
+// PageID is set only for page scope.
+// Revision increases with every commit of that document.
+type PayloadLogicChanged struct {
+	Scope    string         `json:"scope"`
+	PageID   string         `json:"pageId,omitempty"`
+	Logic    map[string]any `json:"logic"`
+	Revision int64          `json:"revision"`
+}
+
+// PayloadLogicSync carries both documents that apply to the joined page, with
+// their revisions so a client can ignore a sync older than what it has.
+type PayloadLogicSync struct {
+	Project         map[string]any `json:"project"`
+	Page            map[string]any `json:"page,omitempty"`
+	PageID          string         `json:"pageId,omitempty"`
+	ProjectRevision int64          `json:"projectRevision"`
+	PageRevision    int64          `json:"pageRevision"`
 }
 
 // PayloadSnapshot allows the client to request a forced save to DB

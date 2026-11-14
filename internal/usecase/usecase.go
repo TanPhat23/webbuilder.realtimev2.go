@@ -15,6 +15,7 @@ func NewUseCase(repo *domainRepo.Repository, lg logger.Logger) *domainUsecase.Us
 	elementWorkflowUC := NewElementWorkflowsUseCase(repo)
 
 	return &domainUsecase.UseCase{
+		Logic:            NewLogicUseCase(repo.LogicRepo),
 		Element:          elemUC,
 		Document:         docUC,
 		Persist:          persistUC,

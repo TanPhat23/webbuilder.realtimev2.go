@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"webbuilder/internal/domain/entity"
+	"webbuilder/internal/domain/logic"
 	domainRepo "webbuilder/internal/domain/repository"
 )
 
@@ -97,8 +98,18 @@ type ElementWorkflowsUseCase interface {
 	RemoveElementWorkflow(ctx context.Context, projectID string, elementID string) error
 }
 
+// LogicUseCase edits and reads page/project logic on behalf of a user. Errors
+// carry AppError codes: ACCESS_DENIED, NOT_FOUND or VALIDATION_ERROR.
+type LogicUseCase interface {
+	Move(ctx context.Context, projectID, pageID, userID, kind, name, to string) (project logic.Revisioned, page logic.Revisioned, err error)
+	Update(ctx context.Context, projectID, pageID, userID string, patch map[string]any, nullPaths ...[][]string) (logic.Revisioned, error)
+	Get(ctx context.Context, projectID, pageID, userID string) (project logic.Revisioned, page logic.Revisioned, err error)
+	Access(ctx context.Context, projectID, userID string) (read bool, write bool, err error)
+}
+
 // UseCase provides a central container for all use case interfaces.
 type UseCase struct {
+	Logic            LogicUseCase
 	Element          ElementUseCase
 	Document         DocumentUseCase
 	Persist          PersistUseCase

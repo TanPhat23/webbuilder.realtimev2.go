@@ -150,6 +150,8 @@ realtime service to upgrade older databases before clients attempt to join pages
 The initial upgrade needs permission to alter `Element`; installations using a
 restricted runtime role can run the SQL with their migration role first.
 
+Logic editing also requires the shared API database migrations through `00004_logic_revision.sql` (including the `Logic` and `LogicRevision` columns on `Project` and `Page`). Apply the API migrations before deploying this realtime service. The service checks project access when a WebSocket connects; owners and editors can edit, while viewers have read-only access.
+
 Regression tests can use disposable PostgreSQL and Redis instances:
 
 ```bash

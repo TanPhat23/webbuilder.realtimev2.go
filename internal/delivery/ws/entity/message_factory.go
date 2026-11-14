@@ -169,6 +169,16 @@ func (f *MessageFactory) DeleteElementWorkflow(elementID string) (domainEntity.M
 	})
 }
 
+// LogicChanged constructs the broadcast for a committed logic update.
+func (f *MessageFactory) LogicChanged(payload domainEntity.PayloadLogicChanged) (domainEntity.Message, error) {
+	return f.Create(domainEntity.TypeLogicUpdate, payload)
+}
+
+// LogicSync constructs the current logic for a joining or resyncing client.
+func (f *MessageFactory) LogicSync(payload domainEntity.PayloadLogicSync) (domainEntity.Message, error) {
+	return f.Create(domainEntity.TypeLogicSync, payload)
+}
+
 // BroadcastPresence constructs a message for broadcasting live user activity.
 func (f *MessageFactory) BroadcastPresence(payload domainEntity.PayloadPresence) (domainEntity.Message, error) {
 	return f.Create(domainEntity.TypePresence, payload)

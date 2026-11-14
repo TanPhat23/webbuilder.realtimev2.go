@@ -13,6 +13,7 @@ import (
 // Client represents a single websocket client connected to a page/room.
 // It owns a buffered send channel which is used by a single writer goroutine.
 type Client struct {
+	ReadOnly  bool
 	ProjectID string
 	Conn      *websocket.Conn
 	PageID    string
@@ -152,32 +153,32 @@ func (c *Client) Close() {
 	c.CloseConn()
 }
 
-	func (c *Client) Factory() *MessageFactory {
-		if c.User != nil && c.User.ID != "" {
-			return NewMessageFactory(c.ProjectID, c.PageID, c.User.ID)
-		}
-		return NewMessageFactory(c.ProjectID, c.PageID)
+func (c *Client) Factory() *MessageFactory {
+	if c.User != nil && c.User.ID != "" {
+		return NewMessageFactory(c.ProjectID, c.PageID, c.User.ID)
 	}
+	return NewMessageFactory(c.ProjectID, c.PageID)
+}
 
-	func (c *Client) SetPresence(p domainEntity.PayloadPresence) {
-		c.PresenceMu.Lock()
-		defer c.PresenceMu.Unlock()
-		c.CursorX = p.CursorX
-		c.CursorY = p.CursorY
-		if p.ElementID == "" {
-			c.ElementID = nil
-		} else {
-			e := p.ElementID
-			c.ElementID = &e
-		}
+func (c *Client) SetPresence(p domainEntity.PayloadPresence) {
+	c.PresenceMu.Lock()
+	defer c.PresenceMu.Unlock()
+	c.CursorX = p.CursorX
+	c.CursorY = p.CursorY
+	if p.ElementID == "" {
+		c.ElementID = nil
+	} else {
+		e := p.ElementID
+		c.ElementID = &e
 	}
+}
 
-	func (c *Client) GetPresence() domainEntity.Presence {
-		c.PresenceMu.Lock()
-		defer c.PresenceMu.Unlock()
-		return domainEntity.Presence{
-			CursorX:   c.CursorX,
-			CursorY:   c.CursorY,
-			ElementID: c.ElementID,
-		}
+func (c *Client) GetPresence() domainEntity.Presence {
+	c.PresenceMu.Lock()
+	defer c.PresenceMu.Unlock()
+	return domainEntity.Presence{
+		CursorX:   c.CursorX,
+		CursorY:   c.CursorY,
+		ElementID: c.ElementID,
 	}
+}

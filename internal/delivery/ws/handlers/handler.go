@@ -28,10 +28,42 @@ type Handler struct {
 	logger   logger.Logger
 	pages    *pageActors
 
+	access ProjectAccess
+
 	// activeConns tracks the currently active client per user+project so that
 	// duplicate connections (e.g. rapid reconnects) can be cleaned up.
 	activeConnsMu sync.Mutex
 	activeConns   map[string]*wsentity.Client
+}
+
+// ProjectAccess reports a user's permissions on a project.
+type ProjectAccess interface {
+	Access(ctx context.Context, projectID, userID string) (read bool, write bool, err error)
+}
+
+// RequireAccess makes the handler refuse users with no access to a project and
+// reject every mutating message from read-only collaborators.
+func (h *Handler) RequireAccess(a ProjectAccess) { h.access = a }
+
+// mutating lists the message types that change project data.
+var mutating = map[domainEntity.MessageType]bool{
+	domainEntity.TypeElementCreate:         true,
+	domainEntity.TypeElementUpdate:         true,
+	domainEntity.TypeElementDelete:         true,
+	domainEntity.TypeElementMove:           true,
+	domainEntity.TypeElementContent:        true,
+	domainEntity.TypeCommentCreate:         true,
+	domainEntity.TypeCommentUpdate:         true,
+	domainEntity.TypeCommentDelete:         true,
+	domainEntity.TypeLogicUpdate:           true,
+	domainEntity.TypeLogicMove:             true,
+	domainEntity.TypeSnapshot:              true,
+	domainEntity.TypeWorkflowCreate:        true,
+	domainEntity.TypeWorkflowUpdate:        true,
+	domainEntity.TypeWorkflowDelete:        true,
+	domainEntity.TypeElementWorkflowCreate: true,
+	domainEntity.TypeElementWorkflowUpdate: true,
+	domainEntity.TypeElementWorkflowDelete: true,
 }
 
 // connKey returns a unique key for tracking a user's active connection to a project.
@@ -58,6 +90,10 @@ func NewHandler(uc *domainUsecase.UseCase, rdb *redis.Client, lg logger.Logger) 
 // registerHandlers maps message types to their respective handling functions (Command Pattern).
 func (h *Handler) registerHandlers() {
 	h.handlers = map[domainEntity.MessageType]MessageHandler{
+		domainEntity.TypeLogicUpdate: h.handleLogicUpdate,
+		domainEntity.TypeLogicMove:   h.handleLogicMove,
+		domainEntity.TypeLogicSync:   h.handleLogicSync,
+
 		// Presence & Sync
 		domainEntity.TypeJoin:        h.handleJoin,
 		domainEntity.TypeLeave:       h.handleLeave,
@@ -87,6 +123,23 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 	user, _ := c.Locals("user").(*domainEntity.User)
 	h.logger.Infof("New WebSocket connection: projectID=%s, userID=%s", projectID, user.ID)
 	client := wsentity.NewClient(c, projectID, user)
+
+	if projectID != "" && h.access != nil {
+		read, write, err := h.access.Access(context.Background(), projectID, user.ID)
+		if err != nil {
+			h.logger.Errorf("access check failed for user=%s project=%s: %v", user.ID, projectID, err)
+			_ = client.WriteJSON(client.Factory().Error(domainErrors.CodeInternal, "could not check access"))
+			client.Release()
+			return
+		}
+		if !read {
+			// Same reply whether the project is missing or private.
+			_ = client.WriteJSON(client.Factory().Error(domainErrors.CodeAccessDenied, "you do not have access to this project"))
+			client.Release()
+			return
+		}
+		client.ReadOnly = !write
+	}
 
 	if projectID == "" {
 		errMsg := client.Factory().Error(domainErrors.CodeValidation, "project ID is required")
@@ -136,12 +189,14 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 
 			// Extract structured error code if available
 			errCode := domainErrors.CodeProcessError
+			errText := err.Error()
 			var appErr *domainErrors.AppError
 			if errors.As(err, &appErr) {
 				errCode = appErr.Code
+				errText = appErr.Message
 			}
 
-			errMsg := client.Factory().ErrorForOp(errCode, err.Error(), msg.ClientOpID)
+			errMsg := client.Factory().ErrorForOp(errCode, errText, msg.ClientOpID)
 			errMsg.RequestID = msg.RequestID
 			if sendErr := client.Send(errMsg); sendErr != nil {
 				h.logger.Errorf("failed to send error to client: %v", sendErr)
@@ -156,6 +211,10 @@ func (h *Handler) processMessage(ctx context.Context, client *wsentity.Client, m
 	msg.ProjectID = client.ProjectID
 	if msg.PageID == "" {
 		msg.PageID = client.PageID
+	}
+
+	if client.ReadOnly && mutating[msg.Type] {
+		return domainErrors.New(domainErrors.CodeAccessDenied, "you have read-only access to this project", nil)
 	}
 
 	handler, ok := h.handlers[msg.Type]

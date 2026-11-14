@@ -11,6 +11,14 @@ import (
 
 type Document map[string]any
 
+// Revisioned is a stored document with its revision: 0 until first written,
+// then incremented by every committed update of that document. Clients use it
+// to drop a document older than one they already have.
+type Revisioned struct {
+	Doc      Document
+	Revision int64
+}
+
 var nameRE = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,63}$`)
 
 func Empty() Document {
@@ -19,10 +27,38 @@ func Empty() Document {
 
 // Merge applies the same recursive null-deleting patch semantics as element settings.
 func Merge(base Document, patch map[string]any) (Document, error) {
+	return MergeWithNulls(base, patch, nil)
+}
+
+// MergeWithNulls preserves merge-patch deletion semantics while allowing
+// explicit literal null values inside variable defaults.
+func MergeWithNulls(base Document, patch map[string]any, nullPaths [][]string) (Document, error) {
 	if base == nil {
 		base = Empty()
 	}
 	merged := Document(elementutils.MergeMap(map[string]any(base), patch))
+	if len(nullPaths) > 1024 {
+		return nil, fmt.Errorf("too many literal null paths")
+	}
+	for _, path := range nullPaths {
+		if len(path) < 3 || len(path) > 64 || path[0] != "variables" || path[2] != "default" {
+			return nil, fmt.Errorf("invalid literal null path")
+		}
+		current := map[string]any(merged)
+		for _, key := range path[:len(path)-1] {
+			child, ok := current[key].(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("literal null path has no object parent")
+			}
+			copy := make(map[string]any, len(child))
+			for k, v := range child {
+				copy[k] = v
+			}
+			current[key] = copy
+			current = copy
+		}
+		current[path[len(path)-1]] = nil
+	}
 	if err := Validate(merged); err != nil {
 		return nil, err
 	}
@@ -146,6 +182,12 @@ var fields = map[string][]string{
 	"if": {"then", "else"}, "run": {}, "code": {},
 }
 
+// A step may be stored before it is filled in, as the editor does: a field
+// that is missing or "" is incomplete, not invalid (the client reports it as
+// "incomplete"). Only a present value of the wrong type or shape is rejected,
+// as are unknown fields, a missing or duplicated verb, and bad nesting.
+// Templates are not parsed here; an unparseable one is incomplete on the
+// client and fails only its own step when run.
 func validateSteps(raw any, depth int) error {
 	steps, ok := raw.([]any)
 	if !ok || depth > 32 {
@@ -172,49 +214,53 @@ func validateSteps(raw any, depth int) error {
 		if !only(step, allowed...) {
 			return fmt.Errorf("step %d has unknown fields", i)
 		}
-		if id, exists := step["id"]; exists {
+		filled := make(map[string]any, len(step))
+		for k, v := range step {
+			if v != "" {
+				filled[k] = v
+			}
+		}
+		if id, exists := filled["id"]; exists {
 			s, ok := id.(string)
 			if !ok || !nameRE.MatchString(s) {
 				return fmt.Errorf("step %d has invalid id", i)
 			}
 		}
-		if verb == "wait" {
-			n, ok := step[verb].(float64)
-			if !ok || n < 0 || n > 60000 {
-				return fmt.Errorf("invalid wait")
-			}
-		} else if verb == "scroll" {
-			switch v := step[verb].(type) {
-			case string:
-				if v == "" {
+		if value, exists := filled[verb]; exists {
+			if verb == "wait" {
+				n, ok := value.(float64)
+				if !ok || n < 0 || n > 60000 {
+					return fmt.Errorf("invalid wait")
+				}
+			} else if verb == "scroll" {
+				switch value.(type) {
+				case string, float64:
+				default:
 					return fmt.Errorf("invalid scroll")
 				}
-			case float64:
-			default:
-				return fmt.Errorf("invalid scroll")
-			}
-		} else {
-			s, ok := step[verb].(string)
-			if !ok || s == "" {
+			} else if _, ok := value.(string); !ok {
 				return fmt.Errorf("invalid %s", verb)
 			}
 		}
-		if err := validateStepFields(verb, step); err != nil {
+		if err := validateStepFields(verb, filled); err != nil {
 			return fmt.Errorf("step %d: %w", i, err)
 		}
 		if verb == "if" {
-			if err := validateSteps(step["then"], depth+1); err != nil {
-				return err
-			}
-			if v, ok := step["else"]; ok {
-				if err := validateSteps(v, depth+1); err != nil {
-					return err
+			// A missing branch is incomplete; a present one must be a step list.
+			for _, branch := range []string{"then", "else"} {
+				if v, ok := step[branch]; ok {
+					if err := validateSteps(v, depth+1); err != nil {
+						return err
+					}
 				}
 			}
 		}
 	}
 	return nil
 }
+
+// The client's class-name rule: one class, or a template checked when it runs.
+var classNameRE = regexp.MustCompile(`^(?:[A-Za-z0-9_:\-/\[\].%]+|[\s\S]*\{\{[\s\S]*)$`)
 
 func validateStepFields(verb string, step map[string]any) error {
 	str := func(key string, required bool) bool {
@@ -258,7 +304,7 @@ func validateStepFields(verb string, step map[string]any) error {
 	}
 	switch verb {
 	case "modal":
-		if !enum("modal", true, "open", "close") || !str("target", false) {
+		if !enum("modal", false, "open", "close") || !str("target", false) {
 			return fmt.Errorf("invalid modal")
 		}
 	case "toast":
@@ -270,26 +316,26 @@ func validateStepFields(verb string, step map[string]any) error {
 			return fmt.Errorf("invalid filename")
 		}
 	case "animate":
-		if !enum("preset", true, "fadeIn", "slideIn", "bounce", "pulse", "shake", "spin") {
+		if !enum("preset", false, "fadeIn", "slideIn", "bounce", "pulse", "shake", "spin") {
 			return fmt.Errorf("invalid animation")
 		}
 	case "class":
-		if !enum("class", true, "add", "remove", "toggle") || !str("target", true) || !str("name", true) {
+		if !enum("class", false, "add", "remove", "toggle") || !str("target", false) || !str("name", false) {
 			return fmt.Errorf("invalid class")
 		}
+		if name, ok := step["name"].(string); ok && !classNameRE.MatchString(name) {
+			return fmt.Errorf("invalid class name")
+		}
 	case "set":
-		if !nameRE.MatchString(step["set"].(string)) || !str("to", false) {
+		if name, ok := step["set"].(string); (ok && !nameRE.MatchString(name)) || !str("to", false) {
 			return fmt.Errorf("invalid set")
 		}
-		if _, ok := step["to"]; !ok {
-			return fmt.Errorf("missing set value")
-		}
 	case "run":
-		if !nameRE.MatchString(step["run"].(string)) {
+		if name, ok := step["run"].(string); ok && !nameRE.MatchString(name) {
 			return fmt.Errorf("invalid flow name")
 		}
 	case "call":
-		if !enum("call", true, "api") || !enum("method", true, "GET", "POST", "PUT", "DELETE", "PATCH") || !str("url", true) || !str("body", false) {
+		if !enum("call", false, "api") || !enum("method", false, "GET", "POST", "PUT", "DELETE", "PATCH") || !str("url", false) || !str("body", false) {
 			return fmt.Errorf("invalid call")
 		}
 		if h, exists := step["headers"]; exists {

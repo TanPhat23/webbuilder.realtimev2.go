@@ -35,6 +35,10 @@ func (h *Handler) handleJoin(ctx context.Context, client *wsentity.Client, msg d
 	syncMsg.RequestID = msg.RequestID
 	_ = client.Send(syncMsg)
 
+	if err := h.sendLogicSync(ctx, client, msg.RequestID); err != nil {
+		h.logger.Errorf("logic sync on join failed: %v", err)
+	}
+
 	projElements, _ := h.uc.Element.GetElementsByProjectID(ctx, client.ProjectID)
 	projWorkflows, _ := h.uc.Workflow.GetWorkflowsByProject(ctx, client.ProjectID)
 	projElementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByProject(ctx, client.ProjectID)

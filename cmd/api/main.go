@@ -76,6 +76,7 @@ func main() {
 
 	// Initialize WebSocket Handler with the central UseCase container
 	wsHandler := handlers.NewHandler(useCases, rdb, lg)
+	wsHandler.RequireAccess(useCases.Logic)
 
 	app := fiber.New()
 
