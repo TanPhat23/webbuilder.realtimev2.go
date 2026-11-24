@@ -35,6 +35,7 @@ type Client struct {
 	CursorX    float64
 	CursorY    float64
 	ElementID  *string
+	Agent      *domainEntity.AgentPresence
 }
 
 // NewClient constructs a new client for the given connection, project, and user.
@@ -160,6 +161,18 @@ func (c *Client) Factory() *MessageFactory {
 	return NewMessageFactory(c.ProjectID, c.PageID)
 }
 
+func cloneAgentPresence(a *domainEntity.AgentPresence) *domainEntity.AgentPresence {
+	if a == nil {
+		return nil
+	}
+	cp := *a
+	if a.ElementID != nil {
+		id := *a.ElementID
+		cp.ElementID = &id
+	}
+	return &cp
+}
+
 func (c *Client) SetPresence(p domainEntity.PayloadPresence) {
 	c.PresenceMu.Lock()
 	defer c.PresenceMu.Unlock()
@@ -171,14 +184,21 @@ func (c *Client) SetPresence(p domainEntity.PayloadPresence) {
 		e := p.ElementID
 		c.ElementID = &e
 	}
+	c.Agent = cloneAgentPresence(p.Agent)
 }
 
 func (c *Client) GetPresence() domainEntity.Presence {
 	c.PresenceMu.Lock()
 	defer c.PresenceMu.Unlock()
+	var elemID *string
+	if c.ElementID != nil {
+		e := *c.ElementID
+		elemID = &e
+	}
 	return domainEntity.Presence{
 		CursorX:   c.CursorX,
 		CursorY:   c.CursorY,
-		ElementID: c.ElementID,
+		ElementID: elemID,
+		Agent:     cloneAgentPresence(c.Agent),
 	}
 }

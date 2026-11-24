@@ -76,6 +76,15 @@ type PayloadSyncProject struct {
 	Users            []UserPresence         `json:"users,omitempty"`
 }
 
+// AgentPresence represents live AI agent cursor/activity state attached to a user's presence.
+type AgentPresence struct {
+	Active    bool    `json:"active"`
+	Name      string  `json:"name"`
+	Status    string  `json:"status"`
+	ElementID *string `json:"elementId,omitempty"`
+	Action    string  `json:"action,omitempty"`
+}
+
 // PayloadPresence tracks user activity for "Who's here" and cursor pins
 type PayloadPresence struct {
 	UserID    string         `json:"userId"`
@@ -84,6 +93,7 @@ type PayloadPresence struct {
 	CursorY   float64        `json:"cursorY"`
 	ElementID string         `json:"elementId,omitempty"`
 	Meta      map[string]any `json:"meta,omitempty"`
+	Agent     *AgentPresence `json:"agent,omitempty"`
 }
 
 // PayloadElementCreate used when a new component is dragged onto the canvas
@@ -216,9 +226,10 @@ type PayloadError struct {
 
 // Presence represents cursor/selection state for a user in a sync message.
 type Presence struct {
-	CursorX   float64 `json:"cursorX"`
-	CursorY   float64 `json:"cursorY"`
-	ElementID *string `json:"elementId,omitempty"`
+	CursorX   float64        `json:"cursorX"`
+	CursorY   float64        `json:"cursorY"`
+	ElementID *string        `json:"elementId,omitempty"`
+	Agent     *AgentPresence `json:"agent,omitempty"`
 }
 
 // UserPresence represents a synchronized user for `sync:page` payloads.
