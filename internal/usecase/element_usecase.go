@@ -89,6 +89,9 @@ func (uc *elementUseCase) CreateElementAt(ctx context.Context, projectID string,
 		if elementutils.FindByID(elements, input.ID) != nil {
 			return nil, domainErrors.New(domainErrors.CodeValidation, "element already exists", nil)
 		}
+		if validation.CountElements(elements)+validation.CountElements([]domainEntity.Element{input}) > validation.MaxElementNodes {
+			return nil, domainErrors.New(domainErrors.CodeValidation, "element tree exceeds maximum node count", nil)
+		}
 		parentID := ""
 		if input.ParentID != nil {
 			parentID = *input.ParentID

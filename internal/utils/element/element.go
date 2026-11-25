@@ -7,6 +7,12 @@ import (
 	"webbuilder/internal/domain/entity"
 )
 
+const (
+	MaxElementTreeDepth = 32
+	MaxElementTreeNodes = 2000
+	MaxMergeMapDepth    = 16
+)
+
 func ParentsEqual(p1, p2 *string) bool {
 	if p1 == nil && p2 == nil {
 		return true
@@ -27,18 +33,21 @@ func CompareParent(p *string, id string) bool {
 // FlattenElements flattens nested Elements for database operations.
 func FlattenElements(elements []entity.Element) []entity.Element {
 	result := make([]entity.Element, 0, len(elements))
-	flatten(elements, &result)
+	flatten(elements, 1, &result)
 	return result
 }
 
-func flatten(elements []entity.Element, result *[]entity.Element) {
-	if len(elements) == 0 {
+func flatten(elements []entity.Element, depth int, result *[]entity.Element) {
+	if len(elements) == 0 || depth > MaxElementTreeDepth || len(*result) >= MaxElementTreeNodes {
 		return
 	}
 	for _, el := range elements {
+		if len(*result) >= MaxElementTreeNodes {
+			return
+		}
 		*result = append(*result, el)
-		if len(el.Elements) > 0 {
-			flatten(el.Elements, result)
+		if len(el.Elements) > 0 && depth < MaxElementTreeDepth {
+			flatten(el.Elements, depth+1, result)
 		}
 	}
 }
@@ -119,18 +128,31 @@ func BuildElementTree(elements []entity.Element) []entity.Element {
 		return a.ID < b.ID
 	})
 
-	var build func(id string) entity.Element
-	build = func(id string) entity.Element {
+	visited := make(map[string]bool, len(elements))
+	totalNodes := 0
+	var build func(id string, depth int) entity.Element
+	build = func(id string, depth int) entity.Element {
 		node := elementMap[id]
+		if visited[id] || depth >= MaxElementTreeDepth || totalNodes >= MaxElementTreeNodes {
+			return node
+		}
+		visited[id] = true
+		totalNodes++
 		for _, cid := range childrenMap[id] {
-			node.Elements = append(node.Elements, build(cid))
+			if visited[cid] || totalNodes >= MaxElementTreeNodes {
+				continue
+			}
+			node.Elements = append(node.Elements, build(cid, depth+1))
 		}
 		return node
 	}
 
 	result := make([]entity.Element, 0, len(roots))
 	for _, rid := range roots {
-		result = append(result, build(rid))
+		if visited[rid] || totalNodes >= MaxElementTreeNodes {
+			continue
+		}
+		result = append(result, build(rid, 1))
 	}
 	return result
 }
@@ -226,12 +248,19 @@ func FindByID(elements []entity.Element, id string) *entity.Element {
 }
 
 // MergeMap deep-merges patch into dst and returns the result without mutating either input.
-// A nil value in patch deletes the key; nested maps are merged recursively; any other value
-// (including arrays) replaces the existing one.
+// A nil value in patch deletes the key; nested maps are merged recursively up to MaxMergeMapDepth;
+// any other value (including arrays) replaces the existing one.
 func MergeMap(dst, patch map[string]any) map[string]any {
+	return mergeMap(dst, patch, 0)
+}
+
+func mergeMap(dst, patch map[string]any, depth int) map[string]any {
 	out := make(map[string]any, len(dst)+len(patch))
 	for k, v := range dst {
 		out[k] = v
+	}
+	if depth >= MaxMergeMapDepth {
+		return out
 	}
 	for k, v := range patch {
 		if v == nil {
@@ -240,11 +269,11 @@ func MergeMap(dst, patch map[string]any) map[string]any {
 		}
 		if pm, ok := v.(map[string]any); ok {
 			if dm, ok := out[k].(map[string]any); ok {
-				out[k] = MergeMap(dm, pm)
+				out[k] = mergeMap(dm, pm, depth+1)
 				continue
 			}
 			// Replacing a non-map (or missing) value: still drop nil entries inside the new map.
-			out[k] = MergeMap(nil, pm)
+			out[k] = mergeMap(nil, pm, depth+1)
 			continue
 		}
 		out[k] = v

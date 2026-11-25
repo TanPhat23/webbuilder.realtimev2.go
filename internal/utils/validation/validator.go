@@ -3,6 +3,7 @@ package validation
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -10,7 +11,55 @@ import (
 	domainEntity "webbuilder/internal/domain/entity"
 )
 
-var validate *validator.Validate
+const (
+	MaxElementDepth = 32
+	MaxElementNodes = 2000
+)
+
+var (
+	validate *validator.Validate
+	safeIDRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+)
+
+// IsValidSafeID reports whether id is a safe 1..128 character identifier containing
+// only ASCII letters, digits, underscores, and hyphens (no ':', slashes, whitespace, or control chars).
+func IsValidSafeID(id string) bool {
+	return safeIDRE.MatchString(id)
+}
+
+// ValidateElementTree enforces depth (max 32) and total node count (max 2000) bounds on an element tree.
+func ValidateElementTree(e *domainEntity.Element) error {
+	if e == nil {
+		return nil
+	}
+	nodes := 0
+	return validateElementNode(e, 1, &nodes)
+}
+
+func validateElementNode(e *domainEntity.Element, depth int, nodes *int) error {
+	if depth > MaxElementDepth {
+		return fmt.Errorf("element tree exceeds maximum depth of %d", MaxElementDepth)
+	}
+	*nodes++
+	if *nodes > MaxElementNodes {
+		return fmt.Errorf("element tree exceeds maximum node count of %d", MaxElementNodes)
+	}
+	for i := range e.Elements {
+		if err := validateElementNode(&e.Elements[i], depth+1, nodes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CountElements returns the total number of nodes in a forest of elements.
+func CountElements(elements []domainEntity.Element) int {
+	count := 0
+	for i := range elements {
+		count += 1 + CountElements(elements[i].Elements)
+	}
+	return count
+}
 
 func init() {
 	validate = validator.New()
@@ -119,6 +168,12 @@ func ValidateComment(p *domainEntity.PayloadComment) error {
 		}
 		if e.PageID == "" {
 			return fmt.Errorf("pageId is required")
+		}
+		if !IsValidSafeID(e.PageID) {
+			return fmt.Errorf("invalid pageId")
+		}
+		if err := ValidateElementTree(e); err != nil {
+			return err
 		}
 		var savedParent *string
 		if e.ParentID != nil {

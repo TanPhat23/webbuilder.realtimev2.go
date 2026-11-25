@@ -7,14 +7,34 @@ import (
 	wsentity "webbuilder/internal/delivery/ws/entity"
 	domainEntity "webbuilder/internal/domain/entity"
 	domainErrors "webbuilder/internal/domain/errors"
+	"webbuilder/internal/utils/validation"
+)
+
+const (
+	maxPresenceMetaKeys  = 16
+	maxPresenceMetaBytes = 4096
 )
 
 func (h *Handler) handleJoin(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
 	if msg.PageID == "" {
 		return domainErrors.New(domainErrors.CodeValidation, "pageId is required to join", nil)
 	}
+	if !validation.IsValidSafeID(msg.PageID) {
+		return domainErrors.New(domainErrors.CodeValidation, "invalid pageId", nil)
+	}
 
-	oldPage := client.PageID
+	if h.pageChecker != nil {
+		belongs, err := h.pageChecker.PageBelongsToProject(ctx, client.ProjectID, msg.PageID)
+		if err != nil {
+			h.logger.Errorf("page ownership check failed for project=%s page=%s: %v", client.ProjectID, msg.PageID, err)
+			return domainErrors.New(domainErrors.CodeInternal, "could not verify page", nil)
+		}
+		if !belongs {
+			return domainErrors.New(domainErrors.CodeNotFound, "page not found in project", nil)
+		}
+	}
+
+	oldPage := client.GetPageID()
 	if oldPage != "" && oldPage != msg.PageID {
 		_ = h.hub.Unregister(ctx, client)
 	}
@@ -24,11 +44,12 @@ func (h *Handler) handleJoin(ctx context.Context, client *wsentity.Client, msg d
 		return err
 	}
 
-	elements, seq, err := h.uc.Element.SyncPageWithSeq(ctx, client.ProjectID, client.PageID)
+	pageID := client.GetPageID()
+	elements, seq, err := h.uc.Element.SyncPageWithSeq(ctx, client.ProjectID, pageID)
 	if err != nil {
 		return err
 	}
-	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByPage(ctx, client.ProjectID, client.PageID)
+	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByPage(ctx, client.ProjectID, pageID)
 
 	users := h.hub.GetRoomParticipants(client.RoomID())
 	syncMsg, _ := client.Factory().SyncPageAt(elements, elementWorkflows, users, seq)
@@ -57,7 +78,7 @@ func (h *Handler) handleJoin(ctx context.Context, client *wsentity.Client, msg d
 }
 
 func (h *Handler) handleLeave(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
-	if client.PageID != "" {
+	if client.GetPageID() != "" {
 		_ = h.hub.Unregister(ctx, client)
 		client.SetPageID("")
 	}
@@ -65,10 +86,40 @@ func (h *Handler) handleLeave(ctx context.Context, client *wsentity.Client, msg 
 }
 
 func (h *Handler) handlePresence(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+	if client.GetPageID() == "" {
+		return domainErrors.ErrNotJoined
+	}
+	if client.User == nil || client.User.ID == "" {
+		return domainErrors.New(domainErrors.CodeUnauthorized, "unauthorized", nil)
+	}
+
 	var payload domainEntity.PayloadPresence
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
+
+	if len(payload.ElementID) > 128 {
+		return domainErrors.New(domainErrors.CodeValidation, "presence elementId is too long", nil)
+	}
+	if len(payload.Meta) > maxPresenceMetaKeys {
+		return domainErrors.New(domainErrors.CodeValidation, "presence meta exceeds maximum key count", nil)
+	}
+	if len(payload.Meta) > 0 {
+		rawMeta, err := json.Marshal(payload.Meta)
+		if err != nil || len(rawMeta) > maxPresenceMetaBytes {
+			return domainErrors.New(domainErrors.CodeValidation, "presence meta exceeds maximum size", nil)
+		}
+	}
+	if payload.Agent != nil {
+		if len(payload.Agent.Name) > 128 || len(payload.Agent.Status) > 128 || len(payload.Agent.Action) > 256 ||
+			(payload.Agent.ElementID != nil && len(*payload.Agent.ElementID) > 128) {
+			return domainErrors.New(domainErrors.CodeValidation, "presence agent fields exceed maximum length", nil)
+		}
+	}
+
+	// Enforce server-authenticated identity so clients cannot spoof other users.
+	payload.UserID = client.User.ID
+	payload.UserName = client.DisplayName()
 
 	// Store the client's latest presence locally so sync responses reflect it,
 	// then broadcast the presence to other clients.
@@ -80,16 +131,17 @@ func (h *Handler) handlePresence(ctx context.Context, client *wsentity.Client, m
 }
 
 func (h *Handler) handleSync(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
-	if client.PageID == "" {
+	pageID := client.GetPageID()
+	if pageID == "" {
 		return domainErrors.ErrNotJoined
 	}
 
-	elements, seq, err := h.uc.Element.SyncPageWithSeq(ctx, client.ProjectID, client.PageID)
+	elements, seq, err := h.uc.Element.SyncPageWithSeq(ctx, client.ProjectID, pageID)
 	if err != nil {
 		return err
 	}
 
-	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByPage(ctx, client.ProjectID, client.PageID)
+	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByPage(ctx, client.ProjectID, pageID)
 
 	users := h.hub.GetRoomParticipants(client.RoomID())
 	syncMsg, _ := client.Factory().SyncPageAt(elements, elementWorkflows, users, seq)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/redis/go-redis/v9"
@@ -13,22 +14,34 @@ import (
 	domainErrors "webbuilder/internal/domain/errors"
 	domainUsecase "webbuilder/internal/domain/usecase"
 	"webbuilder/internal/utils/logger"
+	"webbuilder/internal/utils/validation"
+)
+
+const (
+	maxWSMessageBytes  = 512 << 10 // 512 KB
+	wsPongWait         = 60 * time.Second
+	wsPingPeriod       = (wsPongWait * 9) / 10
+	wsWriteWait        = 10 * time.Second
+	wsRateCapacity     = 60.0
+	wsRateRefillPerSec = 30.0
 )
 
 type MessageHandler func(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error
 
 type Handler struct {
-	uc       *domainUsecase.UseCase
-	hub      *wsentity.Hub
-	handlers map[domainEntity.MessageType]MessageHandler
-	wg       sync.WaitGroup
-	ctx      context.Context
-	cancel   context.CancelFunc
-	sendBuf  int
-	logger   logger.Logger
-	pages    *pageActors
+	uc             *domainUsecase.UseCase
+	hub            *wsentity.Hub
+	handlers       map[domainEntity.MessageType]MessageHandler
+	wg             sync.WaitGroup
+	ctx            context.Context
+	cancel         context.CancelFunc
+	sendBuf        int
+	logger         logger.Logger
+	pages          *pageActors
+	allowedOrigins []string
 
-	access ProjectAccess
+	access      ProjectAccess
+	pageChecker PageChecker
 
 	// activeConns tracks the currently active client per user+project so that
 	// duplicate connections (e.g. rapid reconnects) can be cleaned up.
@@ -41,9 +54,17 @@ type ProjectAccess interface {
 	Access(ctx context.Context, projectID, userID string) (read bool, write bool, err error)
 }
 
+// PageChecker verifies whether a page belongs to a project.
+type PageChecker interface {
+	PageBelongsToProject(ctx context.Context, projectID, pageID string) (bool, error)
+}
+
 // RequireAccess makes the handler refuse users with no access to a project and
 // reject every mutating message from read-only collaborators.
 func (h *Handler) RequireAccess(a ProjectAccess) { h.access = a }
+
+// RequirePageCheck makes handleJoin verify that the requested page belongs to the project.
+func (h *Handler) RequirePageCheck(p PageChecker) { h.pageChecker = p }
 
 // mutating lists the message types that change project data.
 var mutating = map[domainEntity.MessageType]bool{
@@ -121,10 +142,37 @@ func (h *Handler) registerHandlers() {
 func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 	projectID := c.Params("project")
 	user, _ := c.Locals("user").(*domainEntity.User)
+	if user == nil || user.ID == "" {
+		h.logger.Errorf("WebSocket connection rejected: missing authenticated user (projectID=%s)", projectID)
+		client := wsentity.NewClient(c, projectID, nil)
+		_ = client.WriteJSON(client.Factory().Error(domainErrors.CodeUnauthorized, "unauthorized"))
+		client.Release()
+		return
+	}
+
+	if projectID == "" {
+		client := wsentity.NewClient(c, projectID, user)
+		_ = client.WriteJSON(client.Factory().Error(domainErrors.CodeValidation, "project ID is required"))
+		client.Release()
+		return
+	}
+	if !validation.IsValidSafeID(projectID) {
+		client := wsentity.NewClient(c, projectID, user)
+		_ = client.WriteJSON(client.Factory().Error(domainErrors.CodeValidation, "invalid project ID"))
+		client.Release()
+		return
+	}
+	if ticketProj, _ := c.Locals("ticketProjectId").(string); ticketProj != "" && ticketProj != projectID {
+		client := wsentity.NewClient(c, projectID, user)
+		_ = client.WriteJSON(client.Factory().Error(domainErrors.CodeAccessDenied, "ticket is not valid for this project"))
+		client.Release()
+		return
+	}
+
 	h.logger.Infof("New WebSocket connection: projectID=%s, userID=%s", projectID, user.ID)
 	client := wsentity.NewClient(c, projectID, user)
 
-	if projectID != "" && h.access != nil {
+	if h.access != nil {
 		read, write, err := h.access.Access(context.Background(), projectID, user.ID)
 		if err != nil {
 			h.logger.Errorf("access check failed for user=%s project=%s: %v", user.ID, projectID, err)
@@ -141,12 +189,11 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 		client.ReadOnly = !write
 	}
 
-	if projectID == "" {
-		errMsg := client.Factory().Error(domainErrors.CodeValidation, "project ID is required")
-		_ = client.WriteJSON(errMsg)
-		client.Release()
-		return
-	}
+	c.SetReadLimit(maxWSMessageBytes)
+	_ = c.SetReadDeadline(time.Now().Add(wsPongWait))
+	c.SetPongHandler(func(string) error {
+		return c.SetReadDeadline(time.Now().Add(wsPongWait))
+	})
 
 	ck := connKey(projectID, user.ID)
 	h.activeConnsMu.Lock()
@@ -158,9 +205,33 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 	h.activeConns[ck] = client
 	h.activeConnsMu.Unlock()
 
+	pingStop := make(chan struct{})
+	var pingWG sync.WaitGroup
+	pingWG.Add(1)
+	go func() {
+		defer pingWG.Done()
+		ticker := time.NewTicker(wsPingPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pingStop:
+				return
+			case <-h.ctx.Done():
+				return
+			case <-ticker.C:
+				if err := client.WriteControl(websocket.PingMessage, nil, time.Now().Add(wsWriteWait)); err != nil {
+					return
+				}
+			}
+		}
+	}()
+
 	ctx := context.Background()
 
 	defer func() {
+		close(pingStop)
+		pingWG.Wait()
+
 		_ = h.hub.Unregister(h.ctx, client)
 
 		h.activeConnsMu.Lock()
@@ -173,6 +244,12 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 		client.Release()
 	}()
 
+	h.readWSLoop(ctx, c, client)
+}
+
+func (h *Handler) readWSLoop(ctx context.Context, c *websocket.Conn, client *wsentity.Client) {
+	limiter := newTokenBucket(wsRateCapacity, wsRateRefillPerSec)
+
 	for {
 		var msg domainEntity.Message
 		if err := c.ReadJSON(&msg); err != nil {
@@ -181,19 +258,35 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 			}
 			break
 		}
-		h.logger.Infof("Received message: type=%s from userID=%s", msg.Type, user.ID)
+		_ = c.SetReadDeadline(time.Now().Add(wsPongWait))
+
+		if !limiter.allow() {
+			h.logger.Errorf("rate limit exceeded for userID=%s projectID=%s", client.User.ID, client.ProjectID)
+			errMsg := client.Factory().ErrorForOp(domainErrors.CodeValidation, "rate limit exceeded", msg.ClientOpID)
+			errMsg.RequestID = msg.RequestID
+			if sendErr := client.Send(errMsg); sendErr != nil {
+				h.logger.Errorf("failed to send rate limit error to client: %v", sendErr)
+			}
+			continue
+		}
+
+		h.logger.Infof("Received message: type=%s from userID=%s", msg.Type, client.User.ID)
 		h.logger.Debugf("Message details: %+v", msg)
 
 		if err := h.processMessage(ctx, client, msg); err != nil {
 			h.logger.Errorf("Error processing message %s: %v", msg.Type, err)
 
-			// Extract structured error code if available
-			errCode := domainErrors.CodeProcessError
-			errText := err.Error()
+			// Never expose raw internal errors to WebSocket clients.
+			errCode := domainErrors.CodeInternal
+			errText := "internal error"
 			var appErr *domainErrors.AppError
-			if errors.As(err, &appErr) {
+			switch {
+			case errors.As(err, &appErr):
 				errCode = appErr.Code
 				errText = appErr.Message
+			case errors.Is(err, domainErrors.ErrNotJoined):
+				errCode = domainErrors.CodeJoinRequired
+				errText = domainErrors.ErrNotJoined.Error()
 			}
 
 			errMsg := client.Factory().ErrorForOp(errCode, errText, msg.ClientOpID)
@@ -205,12 +298,45 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 	}
 }
 
+type tokenBucket struct {
+	tokens     float64
+	capacity   float64
+	refillRate float64
+	last       time.Time
+}
+
+func newTokenBucket(capacity, refillRate float64) *tokenBucket {
+	return &tokenBucket{
+		tokens:     capacity,
+		capacity:   capacity,
+		refillRate: refillRate,
+		last:       time.Now(),
+	}
+}
+
+func (b *tokenBucket) allow() bool {
+	now := time.Now()
+	elapsed := now.Sub(b.last).Seconds()
+	if elapsed > 0 {
+		b.tokens += elapsed * b.refillRate
+		if b.tokens > b.capacity {
+			b.tokens = b.capacity
+		}
+		b.last = now
+	}
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
+}
+
 // processMessage resolves the handler for a message and executes it.
 func (h *Handler) processMessage(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
 	// Ensure consistency in the incoming message metadata
 	msg.ProjectID = client.ProjectID
 	if msg.PageID == "" {
-		msg.PageID = client.PageID
+		msg.PageID = client.GetPageID()
 	}
 
 	if client.ReadOnly && mutating[msg.Type] {

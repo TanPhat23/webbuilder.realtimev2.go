@@ -40,35 +40,48 @@ func (r *elementWorkflowRepository) pageScope(projectID string, pageID string) f
 
 // elementsInProject is a helper subquery to find all element IDs belonging to a specific project.
 func (r *elementWorkflowRepository) elementsInProject(projectID string) *gorm.DB {
-	return r.db.Model(&entity.Element{}).
-		Select("\"Element\".\"Id\"").
-		Joins("Page").
-		Where("\"Page\".\"ProjectId\" = ?", projectID)
+	return r.elementsInProjectTx(r.db, projectID)
 }
 
-func (r *elementWorkflowRepository) CreateElementWorkflow(ctx context.Context, projectID string, workflow *entity.ElementEventWorkflow) error {
-	// Verify Element and Workflow belong to the project before linking
-	var count int64
-
-	err := r.db.WithContext(ctx).Model(&entity.Element{}).
+func (r *elementWorkflowRepository) elementsInProjectTx(db *gorm.DB, projectID string) *gorm.DB {
+	return db.Model(&entity.Element{}).
+		Select("\"Element\".\"Id\"").
 		Joins("Page").
-		Where("\"Element\".\"Id\" = ? AND \"Page\".\"ProjectId\" = ?", workflow.ElementID, projectID).
+		Where("\"Page\".\"ProjectId\" = ? AND \"Page\".\"DeletedAt\" IS NULL", projectID)
+}
+
+func verifyElementWorkflowOwnership(tx *gorm.DB, projectID, elementID, workflowID string) error {
+	var count int64
+	err := tx.Model(&entity.Element{}).
+		Joins("Page").
+		Where("\"Element\".\"Id\" = ? AND \"Page\".\"ProjectId\" = ? AND \"Page\".\"DeletedAt\" IS NULL", elementID, projectID).
 		Count(&count).Error
 	if err != nil || count == 0 {
 		return fmt.Errorf("invalid element for project: %w", err)
 	}
 
-	err = r.db.WithContext(ctx).Model(&entity.EventWorkflow{}).
-		Where("\"Id\" = ? AND \"ProjectId\" = ?", workflow.WorkflowID, projectID).
+	err = tx.Model(&entity.EventWorkflow{}).
+		Where("\"Id\" = ? AND \"ProjectId\" = ?", workflowID, projectID).
 		Count(&count).Error
 	if err != nil || count == 0 {
 		return fmt.Errorf("invalid workflow for project: %w", err)
 	}
-
-	if err := r.db.WithContext(ctx).Create(workflow).Error; err != nil {
-		return fmt.Errorf("failed to create element workflow: %w", err)
-	}
 	return nil
+}
+
+func (r *elementWorkflowRepository) CreateElementWorkflow(ctx context.Context, projectID string, workflow *entity.ElementEventWorkflow) error {
+	if workflow == nil {
+		return errors.New("element workflow is required")
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := verifyElementWorkflowOwnership(tx, projectID, workflow.ElementID, workflow.WorkflowID); err != nil {
+			return err
+		}
+		if err := tx.Create(workflow).Error; err != nil {
+			return fmt.Errorf("failed to create element workflow: %w", err)
+		}
+		return nil
+	})
 }
 
 func (r *elementWorkflowRepository) GetElementWorkflowByElementID(ctx context.Context, projectID string, elementID string) (*entity.ElementEventWorkflow, error) {
@@ -118,18 +131,27 @@ func (r *elementWorkflowRepository) GetElementWorkflowsByPageID(ctx context.Cont
 }
 
 func (r *elementWorkflowRepository) UpdateElementWorkflow(ctx context.Context, projectID string, workflow *entity.ElementEventWorkflow) error {
-	result := r.db.WithContext(ctx).
-		Model(workflow).
-		Where("\"Id\" = ? AND \"ElementId\" IN (?)", workflow.ID, r.elementsInProject(projectID)).
-		Updates(workflow)
+	if workflow == nil || workflow.ID == "" {
+		return errors.New("element workflow id is required")
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := verifyElementWorkflowOwnership(tx, projectID, workflow.ElementID, workflow.WorkflowID); err != nil {
+			return err
+		}
 
-	if result.Error != nil {
-		return fmt.Errorf("failed to update element workflow: %w", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return errors.New("element workflow not found or unauthorized")
-	}
-	return nil
+		result := tx.Model(&entity.ElementEventWorkflow{}).
+			Select("ElementID", "WorkflowID", "EventName").
+			Where("\"Id\" = ? AND \"ElementId\" IN (?)", workflow.ID, r.elementsInProjectTx(tx, projectID)).
+			Updates(workflow)
+
+		if result.Error != nil {
+			return fmt.Errorf("failed to update element workflow: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("element workflow not found or unauthorized")
+		}
+		return nil
+	})
 }
 
 func (r *elementWorkflowRepository) DeleteElementWorkflow(ctx context.Context, projectID string, elementID string) error {

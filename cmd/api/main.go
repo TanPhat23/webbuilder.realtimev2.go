@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"strings"
 	ulogger "webbuilder/internal/utils/logger"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 
 	"webbuilder/internal/config"
 	"webbuilder/internal/delivery/http/middleware"
@@ -24,6 +26,9 @@ func main() {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		lg.Fatalf("Failed to load config: %v", err)
+	}
+	if cfg.IsUnsafeDevMode() {
+		lg.Fatalf("Refusing to start with DEV_MODE=true in env=%q or with live Clerk key", cfg.Env)
 	}
 
 	db, err := database.NewPostgresConnection(database.Config{
@@ -77,17 +82,32 @@ func main() {
 	// Initialize WebSocket Handler with the central UseCase container
 	wsHandler := handlers.NewHandler(useCases, rdb, lg)
 	wsHandler.RequireAccess(useCases.Logic)
+	wsHandler.RequirePageCheck(repos.ElementRepo)
+	wsHandler.SetAllowedOrigins(cfg.AllowedOrigins)
 
 	app := fiber.New()
 
+	app.Use(recover.New())
 	app.Use(logger.New())
-	app.Use(cors.New())
+
+	corsCfg := cors.Config{
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+		AllowMethods: "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+	}
+	if len(cfg.AllowedOrigins) > 0 {
+		corsCfg.AllowOrigins = strings.Join(cfg.AllowedOrigins, ",")
+	} else {
+		corsCfg.AllowOriginsFunc = func(origin string) bool {
+			return false
+		}
+	}
+	app.Use(cors.New(corsCfg))
 
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.SendString("OK")
 	})
 
-	app.Use(middleware.AuthMiddleware(cfg))
+	app.Use(middleware.AuthMiddleware(cfg, rdb))
 
 	wsHandler.SetupRoutes(app)
 

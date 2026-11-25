@@ -27,6 +27,7 @@ type ElementRepository interface {
 	GetElementByID(ctx context.Context, projectID string, pageID string, elementID string) (*entity.Element, error)
 	GetElementsByPageID(ctx context.Context, projectID string, pageID string) ([]entity.Element, error)
 	GetElementsByProjectID(ctx context.Context, projectID string) ([]entity.Element, error)
+	PageBelongsToProject(ctx context.Context, projectID string, pageID string) (bool, error)
 }
 
 type SnapshotRepository interface {

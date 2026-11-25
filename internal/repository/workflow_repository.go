@@ -33,9 +33,15 @@ func (r *workflowRepository) CreateWorkflow(ctx context.Context, projectID strin
 
 // UpdateWorkflow updates an existing workflow, verified by projectID.
 func (r *workflowRepository) UpdateWorkflow(ctx context.Context, projectID string, workflow *entity.EventWorkflow) error {
+	if workflow == nil {
+		return errors.New("workflow is required")
+	}
+	workflow.ProjectID = projectID
+
 	result := r.db.WithContext(ctx).
 		Model(&entity.EventWorkflow{}).
 		Where(`"Id" = ? AND "ProjectId" = ?`, workflow.ID, projectID).
+		Omit("Id", "ProjectId").
 		Updates(workflow)
 
 	if result.Error != nil {

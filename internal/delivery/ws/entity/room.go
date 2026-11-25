@@ -150,7 +150,7 @@ func (r *Room) clientWriter(c *Client, send <-chan domainEntity.Message) {
 
 			if err := c.WriteJSON(msg); err != nil {
 				if r.logger != nil {
-					r.logger.Errorf("websocket write error (page=%s): %v", c.PageID, err)
+					r.logger.Errorf("websocket write error (page=%s): %v", c.GetPageID(), err)
 				}
 				c.CloseConn()
 				return
@@ -184,24 +184,10 @@ func (r *Room) GetParticipants() []domainEntity.UserPresence {
 	users := make([]domainEntity.UserPresence, 0, len(r.clients))
 	for client := range r.clients {
 		if client.User != nil {
-			name := ""
-			if client.User.FirstName != nil {
-				name = *client.User.FirstName
-			}
-			if client.User.LastName != nil {
-				if name != "" {
-					name += " "
-				}
-				name += *client.User.LastName
-			}
-			if name == "" {
-				name = client.User.Email
-			}
-
 			pres := client.GetPresence()
 			users = append(users, domainEntity.UserPresence{
 				UserID:   client.User.ID,
-				UserName: name,
+				UserName: client.DisplayName(),
 				Presence: pres,
 			})
 		}

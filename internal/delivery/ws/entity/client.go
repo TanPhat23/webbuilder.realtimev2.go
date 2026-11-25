@@ -16,7 +16,8 @@ type Client struct {
 	ReadOnly  bool
 	ProjectID string
 	Conn      *websocket.Conn
-	PageID    string
+	pageMu    sync.RWMutex
+	pageID    string
 	User      *domainEntity.User
 	// sendMu guards send/sendClosed so a send can never race with the channel being closed.
 	sendMu     sync.RWMutex
@@ -110,6 +111,16 @@ func (c *Client) WriteJSON(msg any) error {
 	return c.Conn.WriteJSON(msg)
 }
 
+// WriteControl writes a WebSocket control frame (e.g., PingMessage) serialized with connMu.
+func (c *Client) WriteControl(messageType int, data []byte, deadline time.Time) error {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+	if c.released || c.Conn == nil {
+		return ErrConnReleased
+	}
+	return c.Conn.WriteControl(messageType, data, deadline)
+}
+
 // CloseConn closes the connection unless it was already released. Safe for concurrent use.
 func (c *Client) CloseConn() {
 	c.connMu.Lock()
@@ -132,20 +143,30 @@ func (c *Client) Release() {
 	c.released = true
 }
 
-// SetPageID sets the client's current page ID.
+// GetPageID returns the client's current page ID safely.
+func (c *Client) GetPageID() string {
+	c.pageMu.RLock()
+	defer c.pageMu.RUnlock()
+	return c.pageID
+}
+
+// SetPageID sets the client's current page ID safely.
 func (c *Client) SetPageID(pageID string) {
-	c.PageID = pageID
+	c.pageMu.Lock()
+	defer c.pageMu.Unlock()
+	c.pageID = pageID
 }
 
 // RoomID returns a composite room identifier to ensure uniqueness across projects.
 func (c *Client) RoomID() string {
+	pageID := c.GetPageID()
 	if c.ProjectID == "" {
-		return c.PageID
+		return pageID
 	}
-	if c.PageID == "" {
+	if pageID == "" {
 		return c.ProjectID
 	}
-	return c.ProjectID + ":" + c.PageID
+	return c.ProjectID + ":" + pageID
 }
 
 // Close gracefully closes the client connection and channel.
@@ -155,10 +176,32 @@ func (c *Client) Close() {
 }
 
 func (c *Client) Factory() *MessageFactory {
+	pageID := c.GetPageID()
 	if c.User != nil && c.User.ID != "" {
-		return NewMessageFactory(c.ProjectID, c.PageID, c.User.ID)
+		return NewMessageFactory(c.ProjectID, pageID, c.User.ID)
 	}
-	return NewMessageFactory(c.ProjectID, c.PageID)
+	return NewMessageFactory(c.ProjectID, pageID)
+}
+
+// DisplayName returns the server-derived display name for the client's authenticated user.
+func (c *Client) DisplayName() string {
+	if c == nil || c.User == nil {
+		return ""
+	}
+	name := ""
+	if c.User.FirstName != nil {
+		name = *c.User.FirstName
+	}
+	if c.User.LastName != nil {
+		if name != "" {
+			name += " "
+		}
+		name += *c.User.LastName
+	}
+	if name == "" {
+		name = c.User.Email
+	}
+	return name
 }
 
 func cloneAgentPresence(a *domainEntity.AgentPresence) *domainEntity.AgentPresence {
