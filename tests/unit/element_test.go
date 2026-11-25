@@ -72,7 +72,7 @@ func TestFlattenElements_TableDriven(t *testing.T) {
 				origFirstRootChildren = len(tc.input[0].Elements)
 			}
 
-			got := element.FlattenElements(tc.input)
+			got := element.Flatten(tc.input)
 
 			if len(tc.wantIDs) == 0 {
 				if len(got) != 0 {
@@ -128,7 +128,7 @@ func TestFlattenElements_PreservesProperties(t *testing.T) {
 		},
 	}
 
-	got := element.FlattenElements([]entity.Element{root})
+	got := element.Flatten([]entity.Element{root})
 
 	if len(got) != 2 {
 		t.Fatalf("expected 2 elements in flattened result, got %d", len(got))
@@ -166,7 +166,7 @@ func TestBuildElementTree_Basic(t *testing.T) {
 		{ID: "child", ParentID: strPtr("root")},
 	}
 
-	got := element.BuildElementTree(elements)
+	got := element.BuildTree(elements)
 
 	if len(got) != 1 {
 		t.Fatalf("expected 1 root element, got %d", len(got))
@@ -196,7 +196,7 @@ func TestBuildElementTree_MultipleRootsAndSiblings(t *testing.T) {
 		{ID: "r2c1", ParentID: strPtr("r2")},
 	}
 
-	got := element.BuildElementTree(elements)
+	got := element.BuildTree(elements)
 
 	if len(got) != 2 {
 		t.Fatalf("expected 2 root elements, got %d", len(got))
@@ -224,7 +224,7 @@ func TestBuildElementTree_OrphanBecomesRoot(t *testing.T) {
 		{ID: "orphan", ParentID: strPtr("missing")},
 	}
 
-	got := element.BuildElementTree(elements)
+	got := element.BuildTree(elements)
 	if len(got) != 1 || got[0].ID != "orphan" {
 		t.Fatalf("expected orphan to become root, got %v", idsFromElements(got))
 	}
@@ -235,7 +235,7 @@ func TestBuildElementTree_NoDuplicateRoots(t *testing.T) {
 		{ID: "r"},
 	}
 
-	got := element.BuildElementTree(elements)
+	got := element.BuildTree(elements)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 root, got %d (duplicate roots)", len(got))
 	}
@@ -248,7 +248,7 @@ func TestBuildElementTree_SortsChildrenByOrder(t *testing.T) {
 		{ID: "c2", ParentID: strPtr("root"), Order: 1},
 	}
 
-	got := element.BuildElementTree(elements)
+	got := element.BuildTree(elements)
 	root := findElementByID(got, "root")
 	if root == nil {
 		t.Fatalf("root not found in tree: %v", idsFromElements(got))
@@ -269,7 +269,7 @@ func TestBuildElementTree_SortsRootsByOrderAndTieBreakers(t *testing.T) {
 		{ID: "rootD", Order: 1},
 	}
 
-	got := element.BuildElementTree(elements)
+	got := element.BuildTree(elements)
 
 	ids := idsFromElements(got)
 	// Elements should be ordered by Order, then by ID for deterministic tie-breaking.
@@ -286,9 +286,9 @@ func TestUpdateElement_ReplacesNested(t *testing.T) {
 
 	updated := entity.Element{ID: "grand", Type: "updated"}
 
-	ok := element.UpdateElement(&root, updated)
+	ok := element.Update(&root, updated)
 	if !ok {
-		t.Fatalf("expected UpdateElement to return true")
+		t.Fatalf("expected Update to return true")
 	}
 
 	el := findElementByID([]entity.Element{root}, "grand")
@@ -302,8 +302,8 @@ func TestDeleteElement_DeletesNested(t *testing.T) {
 		makeEl("child", makeEl("grand")),
 	)
 
-	if !element.DeleteElement(&root, "grand") {
-		t.Fatalf("expected DeleteElement to return true")
+	if !element.Delete(&root, "grand") {
+		t.Fatalf("expected Delete to return true")
 	}
 
 	if findElementByID([]entity.Element{root}, "grand") != nil {
@@ -322,9 +322,9 @@ func TestDeleteElement_DeletesNested(t *testing.T) {
 func TestDeleteElement_DeletesImmediateChild(t *testing.T) {
 	root := makeEl("root", makeEl("child"))
 
-	ok := element.DeleteElement(&root, "child")
+	ok := element.Delete(&root, "child")
 	if !ok {
-		t.Fatalf("expected DeleteElement to return true")
+		t.Fatalf("expected Delete to return true")
 	}
 	if len(root.Elements) != 0 {
 		t.Fatalf("expected child to be removed; got %v", idsFromElements(root.Elements))
@@ -334,9 +334,9 @@ func TestDeleteElement_DeletesImmediateChild(t *testing.T) {
 func TestSwapElements_SwapsImmediateChildren(t *testing.T) {
 	root := makeEl("root", makeEl("a"), makeEl("b"), makeEl("c"))
 
-	ok := element.SwapElements(&root, "a", "c")
+	ok := element.Swap(&root, "a", "c")
 	if !ok {
-		t.Fatalf("expected SwapElements to return true")
+		t.Fatalf("expected Swap to return true")
 	}
 
 	ids := idsFromElements(root.Elements)
@@ -349,9 +349,9 @@ func TestSwapElements_SwapsImmediateChildren(t *testing.T) {
 func TestSwapElements_SwapsNestedChildren(t *testing.T) {
 	root := makeEl("root", makeEl("parent", makeEl("a"), makeEl("b"), makeEl("x")))
 
-	ok := element.SwapElements(&root, "a", "b")
+	ok := element.Swap(&root, "a", "b")
 	if !ok {
-		t.Fatalf("expected SwapElements to return true")
+		t.Fatalf("expected Swap to return true")
 	}
 
 	p := findElementByID([]entity.Element{root}, "parent")

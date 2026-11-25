@@ -21,7 +21,7 @@ type Revisioned struct {
 
 var nameRE = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,63}$`)
 
-func Empty() Document {
+func NewEmptyDocument() Document {
 	return Document{"v": float64(1), "variables": map[string]any{}, "flows": map[string]any{}}
 }
 
@@ -34,7 +34,7 @@ func Merge(base Document, patch map[string]any) (Document, error) {
 // explicit literal null values inside variable defaults.
 func MergeWithNulls(base Document, patch map[string]any, nullPaths [][]string) (Document, error) {
 	if base == nil {
-		base = Empty()
+		base = NewEmptyDocument()
 	}
 	merged := Document(elementutils.MergeMap(map[string]any(base), patch))
 	if len(nullPaths) > 1024 {
@@ -74,8 +74,8 @@ func setLiteralNull(doc Document, path []string) error {
 	return nil
 }
 
-func obj(v any) (map[string]any, bool) { m, ok := v.(map[string]any); return m, ok && m != nil }
-func only(m map[string]any, fields ...string) bool {
+func asMap(v any) (map[string]any, bool) { m, ok := v.(map[string]any); return m, ok && m != nil }
+func hasOnlyKeys(m map[string]any, fields ...string) bool {
 	allowed := make(map[string]bool, len(fields))
 	for _, f := range fields {
 		allowed[f] = true
@@ -102,7 +102,7 @@ func validDefault(kind string, value any) bool {
 		if value == nil {
 			return true
 		}
-		_, ok := obj(value)
+		_, ok := asMap(value)
 		return ok
 	case "list":
 		_, ok := value.([]any)
@@ -134,14 +134,14 @@ func Validate(doc Document) error {
 
 // documentSections checks the document envelope and returns its two sections.
 func documentSections(doc Document) (variables, flows map[string]any, err error) {
-	if doc == nil || !only(doc, "v", "variables", "flows") || doc["v"] != float64(1) {
+	if doc == nil || !hasOnlyKeys(doc, "v", "variables", "flows") || doc["v"] != float64(1) {
 		return nil, nil, fmt.Errorf("invalid logic document version or fields")
 	}
-	variables, ok := obj(doc["variables"])
+	variables, ok := asMap(doc["variables"])
 	if !ok {
 		return nil, nil, fmt.Errorf("variables must be an object")
 	}
-	flows, ok = obj(doc["flows"])
+	flows, ok = asMap(doc["flows"])
 	if !ok {
 		return nil, nil, fmt.Errorf("flows must be an object")
 	}
@@ -152,8 +152,8 @@ func validateVariable(name string, raw any) error {
 	if !nameRE.MatchString(name) || inaccessibleNames[name] {
 		return fmt.Errorf("invalid variable name %q", name)
 	}
-	def, ok := obj(raw)
-	if !ok || !only(def, "type", "default", "lifetime") {
+	def, ok := asMap(raw)
+	if !ok || !hasOnlyKeys(def, "type", "default", "lifetime") {
 		return fmt.Errorf("invalid variable %q", name)
 	}
 	return validateVariableDef(name, def)
@@ -167,7 +167,7 @@ func validateVariableDef(name string, def map[string]any) error {
 	if _, exists := def["default"]; !exists {
 		return fmt.Errorf("missing default for variable %q", name)
 	}
-	if !optEnum(def, "lifetime", "page", "session", "local") {
+	if !isOptionalEnum(def, "lifetime", "page", "session", "local") {
 		return fmt.Errorf("invalid lifetime for variable %q", name)
 	}
 	return nil
@@ -177,8 +177,8 @@ func validateFlow(name string, raw any) error {
 	if !nameRE.MatchString(name) {
 		return fmt.Errorf("invalid flow name %q", name)
 	}
-	flow, ok := obj(raw)
-	if !ok || !only(flow, "do") {
+	flow, ok := asMap(raw)
+	if !ok || !hasOnlyKeys(flow, "do") {
 		return fmt.Errorf("invalid flow %q", name)
 	}
 	if err := validateSteps(flow["do"], 0); err != nil {
@@ -196,7 +196,7 @@ func ValidateScopes(project Document, pages map[string]Document) error {
 	seen := map[string]map[string]bool{"variables": {}, "flows": {}}
 	for _, doc := range docs {
 		if doc == nil {
-			doc = Empty()
+			doc = NewEmptyDocument()
 		}
 		if err := Validate(doc); err != nil {
 			return err
@@ -212,7 +212,7 @@ func ValidateScopes(project Document, pages map[string]Document) error {
 
 // claimNames records every name of the given kind in doc, rejecting repeats.
 func claimNames(kind string, doc Document, seen map[string]bool) error {
-	entries, _ := obj(doc[kind])
+	entries, _ := asMap(doc[kind])
 	for name := range entries {
 		if seen[name] {
 			return fmt.Errorf("duplicate %s name %q", kind, name)
@@ -250,7 +250,7 @@ func validateSteps(raw any, depth int) error {
 }
 
 func validateStep(i int, rawStep any, depth int) error {
-	step, ok := obj(rawStep)
+	step, ok := asMap(rawStep)
 	if !ok {
 		return fmt.Errorf("step %d must be an object", i)
 	}
@@ -258,7 +258,7 @@ func validateStep(i int, rawStep any, depth int) error {
 	if err != nil {
 		return err
 	}
-	if !only(step, append([]string{"id", verb}, fields[verb]...)...) {
+	if !hasOnlyKeys(step, append([]string{"id", verb}, fields[verb]...)...) {
 		return fmt.Errorf("step %d has unknown fields", i)
 	}
 	filled := withoutEmpty(step)
@@ -351,7 +351,7 @@ func validateBranches(step map[string]any, depth int) error {
 var classNameRE = regexp.MustCompile(`^(?:[A-Za-z0-9_:\-/\[\].%]+|[\s\S]*\{\{[\s\S]*)$`)
 
 // Optional fields: absent is fine, present must have the right type.
-func optString(step map[string]any, key string) bool {
+func isOptionalString(step map[string]any, key string) bool {
 	v, exists := step[key]
 	if !exists {
 		return true
@@ -360,16 +360,16 @@ func optString(step map[string]any, key string) bool {
 	return ok
 }
 
-func optStrings(step map[string]any, keys ...string) bool {
+func areOptionalStrings(step map[string]any, keys ...string) bool {
 	for _, key := range keys {
-		if !optString(step, key) {
+		if !isOptionalString(step, key) {
 			return false
 		}
 	}
 	return true
 }
 
-func optEnum(step map[string]any, key string, values ...string) bool {
+func isOptionalEnum(step map[string]any, key string, values ...string) bool {
 	v, exists := step[key]
 	if !exists {
 		return true
@@ -382,7 +382,7 @@ func optEnum(step map[string]any, key string, values ...string) bool {
 	return false
 }
 
-func optBool(step map[string]any, key string) bool {
+func isOptionalBool(step map[string]any, key string) bool {
 	v, exists := step[key]
 	if !exists {
 		return true
@@ -391,8 +391,8 @@ func optBool(step map[string]any, key string) bool {
 	return ok
 }
 
-// optNumber requires a finite number in [min, max]; positive makes min exclusive.
-func optNumber(step map[string]any, key string, min float64, positive bool, max float64) bool {
+// isOptionalNumberInRange requires a finite number in [min, max]; positive makes min exclusive.
+func isOptionalNumberInRange(step map[string]any, key string, min float64, positive bool, max float64) bool {
 	v, exists := step[key]
 	if !exists {
 		return true
@@ -404,14 +404,14 @@ func optNumber(step map[string]any, key string, min float64, positive bool, max 
 // validateOptions checks the fields whose type does not depend on the verb.
 func validateOptions(verb string, step map[string]any) error {
 	for _, key := range []string{"newTab", "replace", "smooth"} {
-		if !optBool(step, key) {
+		if !isOptionalBool(step, key) {
 			return fmt.Errorf("invalid option type or value")
 		}
 	}
 	positiveDuration := verb == "animate" || verb == "toast"
-	if !optNumber(step, "duration", 0, positiveDuration, math.MaxFloat64) ||
-		!optNumber(step, "offset", -math.MaxFloat64, false, math.MaxFloat64) ||
-		!optNumber(step, "timeout", 0, true, 60000) {
+	if !isOptionalNumberInRange(step, "duration", 0, positiveDuration, math.MaxFloat64) ||
+		!isOptionalNumberInRange(step, "offset", -math.MaxFloat64, false, math.MaxFloat64) ||
+		!isOptionalNumberInRange(step, "timeout", 0, true, 60000) {
 		return fmt.Errorf("invalid option type or value")
 	}
 	return nil
@@ -441,35 +441,35 @@ func validateStepFields(verb string, step map[string]any) error {
 }
 
 func validateModal(step map[string]any) error {
-	if !optEnum(step, "modal", "open", "close") || !optString(step, "target") {
+	if !isOptionalEnum(step, "modal", "open", "close") || !isOptionalString(step, "target") {
 		return fmt.Errorf("invalid modal")
 	}
 	return nil
 }
 
 func validateToast(step map[string]any) error {
-	if !optEnum(step, "kind", "success", "error", "info", "warning") {
+	if !isOptionalEnum(step, "kind", "success", "error", "info", "warning") {
 		return fmt.Errorf("invalid toast kind")
 	}
 	return nil
 }
 
 func validateDownload(step map[string]any) error {
-	if !optString(step, "filename") {
+	if !isOptionalString(step, "filename") {
 		return fmt.Errorf("invalid filename")
 	}
 	return nil
 }
 
 func validateAnimate(step map[string]any) error {
-	if !optEnum(step, "preset", "fadeIn", "slideIn", "bounce", "pulse", "shake", "spin") {
+	if !isOptionalEnum(step, "preset", "fadeIn", "slideIn", "bounce", "pulse", "shake", "spin") {
 		return fmt.Errorf("invalid animation")
 	}
 	return nil
 }
 
 func validateClass(step map[string]any) error {
-	if !optEnum(step, "class", "add", "remove", "toggle") || !optStrings(step, "target", "name") {
+	if !isOptionalEnum(step, "class", "add", "remove", "toggle") || !areOptionalStrings(step, "target", "name") {
 		return fmt.Errorf("invalid class")
 	}
 	if name, ok := step["name"].(string); ok && !classNameRE.MatchString(name) {
@@ -479,7 +479,7 @@ func validateClass(step map[string]any) error {
 }
 
 func validateSet(step map[string]any) error {
-	if name, ok := step["set"].(string); (ok && !nameRE.MatchString(name)) || !optString(step, "to") {
+	if name, ok := step["set"].(string); (ok && !nameRE.MatchString(name)) || !isOptionalString(step, "to") {
 		return fmt.Errorf("invalid set")
 	}
 	return nil
@@ -493,8 +493,8 @@ func validateRun(step map[string]any) error {
 }
 
 func validateCall(step map[string]any) error {
-	validKind := optEnum(step, "call", "api") && optEnum(step, "method", "GET", "POST", "PUT", "DELETE", "PATCH")
-	if !validKind || !optStrings(step, "url", "body") {
+	validKind := isOptionalEnum(step, "call", "api") && isOptionalEnum(step, "method", "GET", "POST", "PUT", "DELETE", "PATCH")
+	if !validKind || !areOptionalStrings(step, "url", "body") {
 		return fmt.Errorf("invalid call")
 	}
 	return validateHeaders(step)
@@ -505,7 +505,7 @@ func validateHeaders(step map[string]any) error {
 	if !exists {
 		return nil
 	}
-	headers, ok := obj(h)
+	headers, ok := asMap(h)
 	if !ok {
 		return fmt.Errorf("invalid headers")
 	}

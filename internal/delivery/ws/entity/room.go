@@ -52,9 +52,9 @@ func NewRoom(roomID string, parentCtx context.Context, wg *sync.WaitGroup, sendB
 	}
 }
 
-// run starts the room event loop. It manages client registration, unregistration
+// serve starts the room event loop. It manages client registration, unregistration
 // and message broadcasting.
-func (r *Room) run() {
+func (r *Room) serve() {
 	// Ensure cleanup of clients' send channels when the room stops
 	defer func() {
 		r.mu.Lock()
@@ -150,7 +150,7 @@ func (r *Room) clientWriter(c *Client, send <-chan domainEntity.Message) {
 
 			if err := c.WriteJSON(msg); err != nil {
 				if r.logger != nil {
-					r.logger.Errorf("websocket write error (page=%s): %v", c.GetPageID(), err)
+					r.logger.Errorf("websocket write error (page=%s): %v", c.PageID(), err)
 				}
 				c.CloseConn()
 				return
@@ -177,14 +177,14 @@ func clientUserID(c *Client) string {
 	return ""
 }
 
-func (r *Room) GetParticipants() []domainEntity.UserPresence {
+func (r *Room) Participants() []domainEntity.UserPresence {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	users := make([]domainEntity.UserPresence, 0, len(r.clients))
 	for client := range r.clients {
 		if client.User != nil {
-			pres := client.GetPresence()
+			pres := client.Presence()
 			users = append(users, domainEntity.UserPresence{
 				UserID:   client.User.ID,
 				UserName: client.DisplayName(),

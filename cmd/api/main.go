@@ -23,7 +23,7 @@ func main() {
 	lg := ulogger.Default()
 	ctx := context.Background()
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.Load()
 	if err != nil {
 		lg.Fatalf("Failed to load config: %v", err)
 	}
@@ -59,7 +59,7 @@ func main() {
 	// 	lg.Fatalf("Failed to migrate database: %v", err)
 	// }
 
-	rdb, err := redis.NewRedisClient(redis.Config{
+	rdb, err := redis.NewClient(redis.Config{
 		URL:      cfg.Redis.URL,
 		Host:     cfg.Redis.Host,
 		Port:     cfg.Redis.Port,
@@ -71,18 +71,18 @@ func main() {
 	}
 
 	// Initialize the unified repository container
-	repos := repository.NewRepository(db, rdb)
+	repos := repository.New(db, rdb)
 
 	// Initialize the central UseCase container
-	useCases := usecase.NewUseCase(repos, lg)
+	useCases := usecase.New(repos, lg)
 
 	// Start the background persistence worker using the initialized use case
 	go useCases.Persist.Start(ctx)
 
 	// Initialize WebSocket Handler with the central UseCase container
 	wsHandler := handlers.NewHandler(useCases, rdb, lg)
-	wsHandler.RequireAccess(useCases.Logic)
-	wsHandler.RequirePageCheck(repos.ElementRepo)
+	wsHandler.SetAccessChecker(useCases.Logic)
+	wsHandler.SetPageChecker(repos.ElementRepo)
 	wsHandler.SetAllowedOrigins(cfg.AllowedOrigins)
 
 	app := fiber.New()
@@ -107,9 +107,9 @@ func main() {
 		return c.SendString("OK")
 	})
 
-	app.Use(middleware.AuthMiddleware(cfg, rdb))
+	app.Use(middleware.Authenticate(cfg, rdb))
 
-	wsHandler.SetupRoutes(app)
+	wsHandler.RegisterRoutes(app)
 
 	lg.Infof("Server starting on port %s", cfg.ServerPort)
 	if err := app.Listen(":" + cfg.ServerPort); err != nil {

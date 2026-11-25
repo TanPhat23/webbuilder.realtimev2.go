@@ -15,12 +15,12 @@ const (
 	maxPresenceMetaBytes = 4096
 )
 
-func (h *Handler) handleJoin(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
-	if err := h.validateJoin(ctx, client, msg.PageID); err != nil {
+func (h *Handler) joinPage(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+	if err := h.authorizeJoin(ctx, client, msg.PageID); err != nil {
 		return err
 	}
 
-	oldPage := client.GetPageID()
+	oldPage := client.PageID()
 	if oldPage != "" && oldPage != msg.PageID {
 		_ = h.hub.Unregister(ctx, client)
 	}
@@ -39,11 +39,11 @@ func (h *Handler) handleJoin(ctx context.Context, client *wsentity.Client, msg d
 	return nil
 }
 
-func (h *Handler) validateJoin(ctx context.Context, client *wsentity.Client, pageID string) error {
+func (h *Handler) authorizeJoin(ctx context.Context, client *wsentity.Client, pageID string) error {
 	if pageID == "" {
 		return domainErrors.New(domainErrors.CodeValidation, "pageId is required to join", nil)
 	}
-	if !validation.IsValidSafeID(pageID) {
+	if !validation.IsSafeID(pageID) {
 		return domainErrors.New(domainErrors.CodeValidation, "invalid pageId", nil)
 	}
 	if h.pageChecker == nil {
@@ -61,14 +61,14 @@ func (h *Handler) validateJoin(ctx context.Context, client *wsentity.Client, pag
 }
 
 func (h *Handler) sendPageSync(ctx context.Context, client *wsentity.Client, requestID string) error {
-	pageID := client.GetPageID()
+	pageID := client.PageID()
 	elements, seq, err := h.uc.Element.SyncPageWithSeq(ctx, client.ProjectID, pageID)
 	if err != nil {
 		return err
 	}
-	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByPage(ctx, client.ProjectID, pageID)
-	users := h.hub.GetRoomParticipants(client.RoomID())
-	syncMsg, _ := client.Factory().SyncPageAt(elements, elementWorkflows, users, seq)
+	elementWorkflows, _ := h.uc.ElementWorkflows.ListElementWorkflowsByPage(ctx, client.ProjectID, pageID)
+	users := h.hub.RoomParticipants(client.RoomID())
+	syncMsg, _ := client.NewMessageFactory().NewPageSyncAtMessage(elements, elementWorkflows, users, seq)
 	syncMsg.RequestID = requestID
 	_ = client.Send(syncMsg)
 	return nil
@@ -79,24 +79,24 @@ func (h *Handler) sendPageSync(ctx context.Context, client *wsentity.Client, req
 // reconnects; other clients already have the project state and receive granular
 // updates via element/workflow operation broadcasts.
 func (h *Handler) sendProjectSync(ctx context.Context, client *wsentity.Client, requestID string) {
-	elements, _ := h.uc.Element.GetElementsByProjectID(ctx, client.ProjectID)
-	workflows, _ := h.uc.Workflow.GetWorkflowsByProject(ctx, client.ProjectID)
-	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByProject(ctx, client.ProjectID)
-	syncMsg, _ := client.Factory().SyncProject(elements, workflows, elementWorkflows, nil)
+	elements, _ := h.uc.Element.ListElementsByProject(ctx, client.ProjectID)
+	workflows, _ := h.uc.Workflow.ListWorkflowsByProject(ctx, client.ProjectID)
+	elementWorkflows, _ := h.uc.ElementWorkflows.ListElementWorkflowsByProject(ctx, client.ProjectID)
+	syncMsg, _ := client.NewMessageFactory().NewProjectSyncMessage(elements, workflows, elementWorkflows, nil)
 	syncMsg.RequestID = requestID
 	_ = client.Send(syncMsg)
 }
 
-func (h *Handler) handleLeave(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
-	if client.GetPageID() != "" {
+func (h *Handler) leavePage(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+	if client.PageID() != "" {
 		_ = h.hub.Unregister(ctx, client)
 		client.SetPageID("")
 	}
 	return nil
 }
 
-func (h *Handler) handlePresence(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
-	if client.GetPageID() == "" {
+func (h *Handler) updatePresence(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+	if client.PageID() == "" {
 		return domainErrors.ErrNotJoined
 	}
 	if client.User == nil || client.User.ID == "" {
@@ -119,7 +119,7 @@ func (h *Handler) handlePresence(ctx context.Context, client *wsentity.Client, m
 	// then broadcast the presence to other clients.
 	client.SetPresence(payload)
 
-	broadcastMsg, _ := client.Factory().BroadcastPresence(payload)
+	broadcastMsg, _ := client.NewMessageFactory().NewPresenceMessage(payload)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
@@ -146,8 +146,8 @@ func validatePresence(payload domainEntity.PayloadPresence) error {
 	return nil
 }
 
-func (h *Handler) handleSync(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
-	pageID := client.GetPageID()
+func (h *Handler) syncPage(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+	pageID := client.PageID()
 	if pageID == "" {
 		return domainErrors.ErrNotJoined
 	}
@@ -157,25 +157,25 @@ func (h *Handler) handleSync(ctx context.Context, client *wsentity.Client, msg d
 		return err
 	}
 
-	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByPage(ctx, client.ProjectID, pageID)
+	elementWorkflows, _ := h.uc.ElementWorkflows.ListElementWorkflowsByPage(ctx, client.ProjectID, pageID)
 
-	users := h.hub.GetRoomParticipants(client.RoomID())
-	syncMsg, _ := client.Factory().SyncPageAt(elements, elementWorkflows, users, seq)
+	users := h.hub.RoomParticipants(client.RoomID())
+	syncMsg, _ := client.NewMessageFactory().NewPageSyncAtMessage(elements, elementWorkflows, users, seq)
 	syncMsg.RequestID = msg.RequestID
 	_ = client.Send(syncMsg)
 	return nil
 }
 
-func (h *Handler) handleSyncProject(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
-	elements, err := h.uc.Element.GetElementsByProjectID(ctx, client.ProjectID)
+func (h *Handler) syncProject(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+	elements, err := h.uc.Element.ListElementsByProject(ctx, client.ProjectID)
 	if err != nil {
 		return err
 	}
 
-	workflows, _ := h.uc.Workflow.GetWorkflowsByProject(ctx, client.ProjectID)
-	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByProject(ctx, client.ProjectID)
+	workflows, _ := h.uc.Workflow.ListWorkflowsByProject(ctx, client.ProjectID)
+	elementWorkflows, _ := h.uc.ElementWorkflows.ListElementWorkflowsByProject(ctx, client.ProjectID)
 
-	syncMsg, err := client.Factory().SyncProject(elements, workflows, elementWorkflows, nil)
+	syncMsg, err := client.NewMessageFactory().NewProjectSyncMessage(elements, workflows, elementWorkflows, nil)
 	if err != nil {
 		return err
 	}

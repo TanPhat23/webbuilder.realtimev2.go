@@ -51,7 +51,7 @@ type Handler struct {
 
 // ProjectAccess reports a user's permissions on a project.
 type ProjectAccess interface {
-	Access(ctx context.Context, projectID, userID string) (read bool, write bool, err error)
+	CheckAccess(ctx context.Context, projectID, userID string) (read bool, write bool, err error)
 }
 
 // PageChecker verifies whether a page belongs to a project.
@@ -59,12 +59,12 @@ type PageChecker interface {
 	PageBelongsToProject(ctx context.Context, projectID, pageID string) (bool, error)
 }
 
-// RequireAccess makes the handler refuse users with no access to a project and
+// SetAccessChecker makes the handler refuse users with no access to a project and
 // reject every mutating message from read-only collaborators.
-func (h *Handler) RequireAccess(a ProjectAccess) { h.access = a }
+func (h *Handler) SetAccessChecker(a ProjectAccess) { h.access = a }
 
-// RequirePageCheck makes handleJoin verify that the requested page belongs to the project.
-func (h *Handler) RequirePageCheck(p PageChecker) { h.pageChecker = p }
+// SetPageChecker makes joinPage verify that the requested page belongs to the project.
+func (h *Handler) SetPageChecker(p PageChecker) { h.pageChecker = p }
 
 // mutating lists the message types that change project data.
 var mutating = map[domainEntity.MessageType]bool{
@@ -104,42 +104,42 @@ func NewHandler(uc *domainUsecase.UseCase, rdb *redis.Client, lg logger.Logger) 
 	}
 	h.pages = newPageActors(ctx, pageActorIdle)
 	h.hub = wsentity.NewHub(h.ctx, &h.wg, h.sendBuf, rdb, lg)
-	h.registerHandlers()
+	h.registerMessageRoutes()
 	return h
 }
 
-// registerHandlers maps message types to their respective handling functions (Command Pattern).
-func (h *Handler) registerHandlers() {
+// registerMessageRoutes maps message types to their respective handling functions (Command Pattern).
+func (h *Handler) registerMessageRoutes() {
 	h.handlers = map[domainEntity.MessageType]MessageHandler{
-		domainEntity.TypeLogicUpdate: h.handleLogicUpdate,
-		domainEntity.TypeLogicMove:   h.handleLogicMove,
-		domainEntity.TypeLogicSync:   h.handleLogicSync,
+		domainEntity.TypeLogicUpdate: h.updateLogic,
+		domainEntity.TypeLogicMove:   h.moveLogic,
+		domainEntity.TypeLogicSync:   h.syncLogic,
 
 		// Presence & Sync
-		domainEntity.TypeJoin:        h.handleJoin,
-		domainEntity.TypeLeave:       h.handleLeave,
-		domainEntity.TypePresence:    h.handlePresence,
-		domainEntity.TypeSync:        h.handleSync,
-		domainEntity.TypeSyncProject: h.handleSyncProject,
+		domainEntity.TypeJoin:        h.joinPage,
+		domainEntity.TypeLeave:       h.leavePage,
+		domainEntity.TypePresence:    h.updatePresence,
+		domainEntity.TypeSync:        h.syncPage,
+		domainEntity.TypeSyncProject: h.syncProject,
 
 		// Element Operations
-		domainEntity.TypeElementCreate: h.handleElementCreate,
-		domainEntity.TypeElementUpdate: h.handleElementUpdate,
-		domainEntity.TypeElementDelete: h.handleElementDelete,
-		domainEntity.TypeElementMove:   h.handleElementMove,
+		domainEntity.TypeElementCreate: h.createElement,
+		domainEntity.TypeElementUpdate: h.updateElement,
+		domainEntity.TypeElementDelete: h.deleteElement,
+		domainEntity.TypeElementMove:   h.moveElement,
 
 		// Workflow Operations
-		domainEntity.TypeWorkflowCreate:        h.handleWorkflowCreate,
-		domainEntity.TypeWorkflowUpdate:        h.handleWorkflowUpdate,
-		domainEntity.TypeWorkflowDelete:        h.handleWorkflowDelete,
-		domainEntity.TypeElementWorkflowCreate: h.handleElementWorkflowCreate,
-		domainEntity.TypeElementWorkflowUpdate: h.handleElementWorkflowUpdate,
-		domainEntity.TypeElementWorkflowDelete: h.handleElementWorkflowDelete,
+		domainEntity.TypeWorkflowCreate:        h.createWorkflow,
+		domainEntity.TypeWorkflowUpdate:        h.updateWorkflow,
+		domainEntity.TypeWorkflowDelete:        h.deleteWorkflow,
+		domainEntity.TypeElementWorkflowCreate: h.createElementWorkflow,
+		domainEntity.TypeElementWorkflowUpdate: h.updateElementWorkflow,
+		domainEntity.TypeElementWorkflowDelete: h.deleteElementWorkflow,
 	}
 }
 
-// HandleWebSocket is the main entry point for upgraded WebSocket connections.
-func (h *Handler) HandleWebSocket(c *websocket.Conn) {
+// ServeWebSocket is the main entry point for upgraded WebSocket connections.
+func (h *Handler) ServeWebSocket(c *websocket.Conn) {
 	projectID := c.Params("project")
 	user, _ := c.Locals("user").(*domainEntity.User)
 	if user == nil || user.ID == "" {
@@ -156,7 +156,7 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 	client := wsentity.NewClient(c, projectID, user)
 
 	if code, message := h.authorizeWSAccess(client, projectID, user.ID); code != "" {
-		_ = client.WriteJSON(client.Factory().Error(code, message))
+		_ = client.WriteJSON(client.NewMessageFactory().NewErrorMessage(code, message))
 		client.Release()
 		return
 	}
@@ -180,7 +180,7 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 // rejectWS sends a single error frame to a connection that failed admission and releases it.
 func rejectWS(c *websocket.Conn, projectID string, user *domainEntity.User, code, message string) {
 	client := wsentity.NewClient(c, projectID, user)
-	_ = client.WriteJSON(client.Factory().Error(code, message))
+	_ = client.WriteJSON(client.NewMessageFactory().NewErrorMessage(code, message))
 	client.Release()
 }
 
@@ -189,7 +189,7 @@ func validateWSRequest(c *websocket.Conn, projectID string) (code, message strin
 	if projectID == "" {
 		return domainErrors.CodeValidation, "project ID is required"
 	}
-	if !validation.IsValidSafeID(projectID) {
+	if !validation.IsSafeID(projectID) {
 		return domainErrors.CodeValidation, "invalid project ID"
 	}
 	if ticketProj, _ := c.Locals("ticketProjectId").(string); ticketProj != "" && ticketProj != projectID {
@@ -204,7 +204,7 @@ func (h *Handler) authorizeWSAccess(client *wsentity.Client, projectID, userID s
 	if h.access == nil {
 		return "", ""
 	}
-	read, write, err := h.access.Access(context.Background(), projectID, userID)
+	read, write, err := h.access.CheckAccess(context.Background(), projectID, userID)
 	if err != nil {
 		h.logger.Errorf("access check failed for user=%s project=%s: %v", userID, projectID, err)
 		return domainErrors.CodeInternal, "could not check access"
@@ -288,7 +288,7 @@ func (h *Handler) readWSLoop(ctx context.Context, c *websocket.Conn, client *wse
 
 		if !limiter.allow() {
 			h.logger.Errorf("rate limit exceeded for userID=%s projectID=%s", client.User.ID, client.ProjectID)
-			errMsg := client.Factory().ErrorForOp(domainErrors.CodeValidation, "rate limit exceeded", msg.ClientOpID)
+			errMsg := client.NewMessageFactory().NewErrorMessageForOp(domainErrors.CodeValidation, "rate limit exceeded", msg.ClientOpID)
 			errMsg.RequestID = msg.RequestID
 			if sendErr := client.Send(errMsg); sendErr != nil {
 				h.logger.Errorf("failed to send rate limit error to client: %v", sendErr)
@@ -299,7 +299,7 @@ func (h *Handler) readWSLoop(ctx context.Context, c *websocket.Conn, client *wse
 		h.logger.Infof("Received message: type=%s from userID=%s", msg.Type, client.User.ID)
 		h.logger.Debugf("Message details: %+v", msg)
 
-		if err := h.processMessage(ctx, client, msg); err != nil {
+		if err := h.dispatchMessage(ctx, client, msg); err != nil {
 			h.logger.Errorf("Error processing message %s: %v", msg.Type, err)
 
 			// Never expose raw internal errors to WebSocket clients.
@@ -315,7 +315,7 @@ func (h *Handler) readWSLoop(ctx context.Context, c *websocket.Conn, client *wse
 				errText = domainErrors.ErrNotJoined.Error()
 			}
 
-			errMsg := client.Factory().ErrorForOp(errCode, errText, msg.ClientOpID)
+			errMsg := client.NewMessageFactory().NewErrorMessageForOp(errCode, errText, msg.ClientOpID)
 			errMsg.RequestID = msg.RequestID
 			if sendErr := client.Send(errMsg); sendErr != nil {
 				h.logger.Errorf("failed to send error to client: %v", sendErr)
@@ -357,12 +357,12 @@ func (b *tokenBucket) allow() bool {
 	return true
 }
 
-// processMessage resolves the handler for a message and executes it.
-func (h *Handler) processMessage(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+// dispatchMessage resolves the handler for a message and executes it.
+func (h *Handler) dispatchMessage(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
 	// Ensure consistency in the incoming message metadata
 	msg.ProjectID = client.ProjectID
 	if msg.PageID == "" {
-		msg.PageID = client.GetPageID()
+		msg.PageID = client.PageID()
 	}
 
 	if client.ReadOnly && mutating[msg.Type] {

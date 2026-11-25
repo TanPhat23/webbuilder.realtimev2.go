@@ -57,7 +57,7 @@ func TestMessageFactory_Create(t *testing.T) {
 			UserID:   "user-123",
 			UserName: "Tester",
 		}
-		msg, err := f.Create(domainEntity.TypePresence, payload)
+		msg, err := f.NewMessage(domainEntity.TypePresence, payload)
 		if err != nil {
 			t.Fatalf("failed to create message: %v", err)
 		}
@@ -82,7 +82,7 @@ func TestMessageFactory_Create(t *testing.T) {
 	})
 
 	t.Run("create without payload", func(t *testing.T) {
-		msg, err := f.Create(domainEntity.TypeLeave, nil)
+		msg, err := f.NewMessage(domainEntity.TypeLeave, nil)
 		if err != nil {
 			t.Fatalf("failed to create message: %v", err)
 		}
@@ -97,7 +97,7 @@ func TestMessageFactory_Helpers(t *testing.T) {
 
 	t.Run("ElementDelete", func(t *testing.T) {
 		id := "el-delete-id"
-		msg, _ := f.DeleteElement(id)
+		msg, _ := f.NewElementDeletedMessage(id)
 		if msg.Type != domainEntity.TypeElementDelete {
 			t.Errorf("wrong type: %s", msg.Type)
 		}
@@ -112,7 +112,7 @@ func TestMessageFactory_Helpers(t *testing.T) {
 	t.Run("Error", func(t *testing.T) {
 		code := "TEST_ERROR"
 		errMsg := "something went wrong"
-		msg := f.Error(code, errMsg)
+		msg := f.NewErrorMessage(code, errMsg)
 
 		if msg.Type != domainEntity.TypeError {
 			t.Errorf("wrong type: %s", msg.Type)
@@ -168,7 +168,7 @@ func TestMessageFactory_SyncPage_SerializesUserPresence(t *testing.T) {
 		},
 	}
 
-	msg, err := f.SyncPage(nil, nil, users)
+	msg, err := f.NewPageSyncMessage(nil, nil, users)
 	if err != nil {
 		t.Fatalf("SyncPage failed: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestHub_Basic(t *testing.T) {
 	}
 
 	t.Run("get participants of non-existent room", func(t *testing.T) {
-		users := hub.GetRoomParticipants("none")
+		users := hub.RoomParticipants("none")
 		if len(users) != 0 {
 			t.Errorf("expected 0 users, got %d", len(users))
 		}
@@ -250,7 +250,7 @@ func TestRoom_Initialization(t *testing.T) {
 	}
 
 	t.Run("get participants from empty room", func(t *testing.T) {
-		users := room.GetParticipants()
+		users := room.Participants()
 		if len(users) != 0 {
 			t.Errorf("expected 0 participants, got %d", len(users))
 		}
@@ -286,7 +286,7 @@ func TestMessageFactory_SyncPage_SanitizesElements(t *testing.T) {
 		},
 	}
 
-	msg, err := f.SyncPage(elements, nil, nil)
+	msg, err := f.NewPageSyncMessage(elements, nil, nil)
 	if err != nil {
 		t.Fatalf("SyncPage failed: %v", err)
 	}

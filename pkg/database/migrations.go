@@ -6,10 +6,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// migrateRealtimeSchema upgrades the API-owned schema only for fields required
+// ensureOrderKeyColumn upgrades the API-owned schema only for fields required
 // by the realtime engine. Do not AutoMigrate the full entity graph: the API and
 // realtime service share tables and must not rewrite each other's definitions.
-func migrateRealtimeSchema(db *gorm.DB) error {
+func ensureOrderKeyColumn(db *gorm.DB) error {
 	// An already-upgraded schema also works with a runtime role that cannot ALTER.
 	if db.Migrator().HasColumn("Element", "OrderKey") {
 		return nil

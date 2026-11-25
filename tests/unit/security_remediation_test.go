@@ -37,7 +37,7 @@ func TestIsValidSafeID(t *testing.T) {
 		strings.Repeat("a", 128),
 	}
 	for _, id := range valid {
-		if !validation.IsValidSafeID(id) {
+		if !validation.IsSafeID(id) {
 			t.Fatalf("expected %q to be a valid safe ID", id)
 		}
 	}
@@ -54,7 +54,7 @@ func TestIsValidSafeID(t *testing.T) {
 		strings.Repeat("a", 129),
 	}
 	for _, id := range invalid {
-		if validation.IsValidSafeID(id) {
+		if validation.IsSafeID(id) {
 			t.Fatalf("expected %q to be rejected as unsafe ID", id)
 		}
 	}
@@ -74,12 +74,12 @@ func TestValidateElementTreeBounds(t *testing.T) {
 	}
 
 	okTree := buildChain(validation.MaxElementDepth)
-	if err := validation.ValidateElementForAdd(&okTree); err != nil {
+	if err := validation.ElementForCreate(&okTree); err != nil {
 		t.Fatalf("depth %d should be allowed, got: %v", validation.MaxElementDepth, err)
 	}
 
 	tooDeep := buildChain(validation.MaxElementDepth + 1)
-	if err := validation.ValidateElementForAdd(&tooDeep); err == nil {
+	if err := validation.ElementForCreate(&tooDeep); err == nil {
 		t.Fatalf("expected depth %d to be rejected", validation.MaxElementDepth+1)
 	}
 
@@ -87,13 +87,13 @@ func TestValidateElementTreeBounds(t *testing.T) {
 	for i := 0; i < validation.MaxElementNodes-1; i++ {
 		wideOK.Elements = append(wideOK.Elements, entity.Element{Type: "text", PageID: "page-1"})
 	}
-	if err := validation.ValidateElementForAdd(&wideOK); err != nil {
+	if err := validation.ElementForCreate(&wideOK); err != nil {
 		t.Fatalf("%d nodes should be allowed, got: %v", validation.MaxElementNodes, err)
 	}
 
 	wideTooMany := wideOK
 	wideTooMany.Elements = append(wideTooMany.Elements, entity.Element{Type: "text", PageID: "page-1"})
-	if err := validation.ValidateElementForAdd(&wideTooMany); err == nil {
+	if err := validation.ElementForCreate(&wideTooMany); err == nil {
 		t.Fatalf("expected %d nodes to be rejected", validation.MaxElementNodes+1)
 	}
 }
@@ -180,7 +180,7 @@ func startHardenedWSServer(
 
 	h := handlers.NewHandler(uc, nil, &mockLogger{})
 	if checker != nil {
-		h.RequirePageCheck(checker)
+		h.SetPageChecker(checker)
 	}
 	if len(allowedOrigins) > 0 {
 		h.SetAllowedOrigins(allowedOrigins)
@@ -208,7 +208,7 @@ func startHardenedWSServer(
 		})
 		return c.Next()
 	})
-	h.SetupRoutes(app)
+	h.RegisterRoutes(app)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -503,15 +503,15 @@ func TestWS_OriginRestriction_CSWSH(t *testing.T) {
 }
 
 func TestConfigAndAuthMiddleware_Security(t *testing.T) {
-	// LoadConfig refuses empty ALLOWED_ORIGINS in production.
+	// Load refuses empty ALLOWED_ORIGINS in production.
 	t.Setenv("ENV", "production")
 	t.Setenv("ALLOWED_ORIGINS", "")
-	if _, err := config.LoadConfig(); err == nil {
-		t.Fatal("expected LoadConfig to fail when ENV=production and ALLOWED_ORIGINS is empty")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("expected Load to fail when ENV=production and ALLOWED_ORIGINS is empty")
 	}
 
 	t.Setenv("ALLOWED_ORIGINS", "https://app.example.com")
-	cfg, err := config.LoadConfig()
+	cfg, err := config.Load()
 	if err != nil {
 		t.Fatalf("expected valid production config to load, got: %v", err)
 	}
@@ -534,7 +534,7 @@ func TestConfigAndAuthMiddleware_Security(t *testing.T) {
 				t.Fatalf("expected %s to be flagged unsafe dev mode", tc.name)
 			}
 			app := fiber.New()
-			app.Use(middleware.AuthMiddleware(&tc.cfg))
+			app.Use(middleware.Authenticate(&tc.cfg))
 			app.Get("/test", func(c *fiber.Ctx) error { return c.SendString("ok") })
 			resp, err := app.Test(httptest.NewRequest("GET", "/test", nil))
 			if err != nil {
@@ -546,10 +546,10 @@ func TestConfigAndAuthMiddleware_Security(t *testing.T) {
 		})
 	}
 
-	// Non-dev AuthMiddleware rejects __session cookie and ?token= query param.
+	// Non-dev Authenticate rejects __session cookie and ?token= query param.
 	prodCfg := &config.Config{Env: "production", DevMode: false, ClerkSecretKey: "sk_test_dummy"}
 	app := fiber.New()
-	app.Use(middleware.AuthMiddleware(prodCfg))
+	app.Use(middleware.Authenticate(prodCfg))
 	app.Get("/ws/p1", func(c *fiber.Ctx) error { return c.SendString("ok") })
 
 	reqCookie := httptest.NewRequest("GET", "/ws/p1", nil)

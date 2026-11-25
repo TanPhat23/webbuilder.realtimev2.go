@@ -9,7 +9,7 @@ import (
 	domainErrors "webbuilder/internal/domain/errors"
 )
 
-func (h *Handler) handleWorkflowCreate(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+func (h *Handler) createWorkflow(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
 	var payload domainEntity.PayloadWorkflow
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
@@ -19,12 +19,12 @@ func (h *Handler) handleWorkflowCreate(ctx context.Context, client *wsentity.Cli
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().CreateWorkflow(payload.Workflow)
+	broadcastMsg, _ := client.NewMessageFactory().NewWorkflowCreatedMessage(payload.Workflow)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
 
-func (h *Handler) handleWorkflowUpdate(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+func (h *Handler) updateWorkflow(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
 	var payload domainEntity.PayloadWorkflow
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
@@ -34,27 +34,27 @@ func (h *Handler) handleWorkflowUpdate(ctx context.Context, client *wsentity.Cli
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().UpdateWorkflow(payload.Workflow)
+	broadcastMsg, _ := client.NewMessageFactory().NewWorkflowUpdatedMessage(payload.Workflow)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
 
-func (h *Handler) handleWorkflowDelete(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+func (h *Handler) deleteWorkflow(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
 	var payload domainEntity.PayloadWorkflowDelete
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
 
-	if err := h.uc.Workflow.RemoveWorkflow(ctx, client.ProjectID, payload.ID); err != nil {
+	if err := h.uc.Workflow.DeleteWorkflow(ctx, client.ProjectID, payload.ID); err != nil {
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().DeleteWorkflow(payload.ID)
+	broadcastMsg, _ := client.NewMessageFactory().NewWorkflowDeletedMessage(payload.ID)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
 
-func (h *Handler) handleElementWorkflowCreate(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+func (h *Handler) createElementWorkflow(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
 	var payload domainEntity.PayloadElementWorkflow
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
@@ -64,12 +64,12 @@ func (h *Handler) handleElementWorkflowCreate(ctx context.Context, client *wsent
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().CreateElementWorkflow(payload.Workflow)
+	broadcastMsg, _ := client.NewMessageFactory().NewElementWorkflowCreatedMessage(payload.Workflow)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
 
-func (h *Handler) handleElementWorkflowUpdate(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+func (h *Handler) updateElementWorkflow(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
 	var payload domainEntity.PayloadElementWorkflow
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
@@ -79,22 +79,22 @@ func (h *Handler) handleElementWorkflowUpdate(ctx context.Context, client *wsent
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().UpdateElementWorkflow(payload.Workflow)
+	broadcastMsg, _ := client.NewMessageFactory().NewElementWorkflowUpdatedMessage(payload.Workflow)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }
 
-func (h *Handler) handleElementWorkflowDelete(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
+func (h *Handler) deleteElementWorkflow(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
 	var payload domainEntity.PayloadElementWorkflowDelete
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
 
-	if err := h.uc.ElementWorkflows.RemoveElementWorkflow(ctx, client.ProjectID, payload.ElementID); err != nil {
+	if err := h.uc.ElementWorkflows.DeleteElementWorkflow(ctx, client.ProjectID, payload.ElementID); err != nil {
 		return err
 	}
 
-	broadcastMsg, _ := client.Factory().DeleteElementWorkflow(payload.ElementID)
+	broadcastMsg, _ := client.NewMessageFactory().NewElementWorkflowDeletedMessage(payload.ElementID)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
 	return nil
 }

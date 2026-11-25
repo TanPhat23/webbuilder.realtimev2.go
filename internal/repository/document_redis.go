@@ -40,7 +40,7 @@ func NewDocumentRepository(client *redis.Client) domainRepo.DocumentRepository {
 
 // SetDocument stores the list of elements for a page in Redis
 func (r *documentRepository) SetDocument(ctx context.Context, projectID string, pageID string, elements []domainEntity.Element) error {
-	key := r.getKey(projectID, pageID)
+	key := r.docKey(projectID, pageID)
 
 	data, err := json.Marshal(elements)
 	if err != nil {
@@ -56,7 +56,7 @@ func (r *documentRepository) SetDocument(ctx context.Context, projectID string, 
 
 // GetDocument retrieves the list of elements for a page from Redis
 func (r *documentRepository) GetDocument(ctx context.Context, projectID string, pageID string) ([]domainEntity.Element, error) {
-	key := r.getKey(projectID, pageID)
+	key := r.docKey(projectID, pageID)
 
 	val, err := r.client.Get(ctx, key).Result()
 	if err != nil {
@@ -76,7 +76,7 @@ func (r *documentRepository) GetDocument(ctx context.Context, projectID string, 
 
 // DeleteDocument removes the page elements from Redis
 func (r *documentRepository) DeleteDocument(ctx context.Context, projectID string, pageID string) error {
-	key := r.getKey(projectID, pageID)
+	key := r.docKey(projectID, pageID)
 
 	if err := r.client.Del(ctx, key).Err(); err != nil {
 		return fmt.Errorf("failed to delete key from redis: %w", err)
@@ -125,7 +125,7 @@ func (r *documentRepository) SetDocumentIfAbsent(ctx context.Context, projectID 
 	if err != nil {
 		return fmt.Errorf("failed to marshal elements: %w", err)
 	}
-	if err := r.client.SetNX(ctx, r.getKey(projectID, pageID), data, r.ttl).Err(); err != nil {
+	if err := r.client.SetNX(ctx, r.docKey(projectID, pageID), data, r.ttl).Err(); err != nil {
 		return fmt.Errorf("failed to set value in redis: %w", err)
 	}
 	return nil
@@ -134,11 +134,11 @@ func (r *documentRepository) SetDocumentIfAbsent(ctx context.Context, projectID 
 // GetDocumentWithSeq reads the document and its sequence number in one MULTI/EXEC so the pair
 // is a consistent snapshot (mutations write both in a single transaction).
 func (r *documentRepository) GetDocumentWithSeq(ctx context.Context, projectID string, pageID string) ([]domainEntity.Element, int64, error) {
-	key := r.getKey(projectID, pageID)
+	key := r.docKey(projectID, pageID)
 
 	pipe := r.client.TxPipeline()
 	docCmd := pipe.Get(ctx, key)
-	seqCmd := pipe.Get(ctx, r.getSeqKey(projectID, pageID))
+	seqCmd := pipe.Get(ctx, r.seqKey(projectID, pageID))
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 		return nil, 0, fmt.Errorf("failed to read document snapshot from redis: %w", err)
 	}
@@ -170,8 +170,8 @@ func (r *documentRepository) GetDocumentWithSeq(ctx context.Context, projectID s
 // whole read-modify-write is retried against fresh data. The sequence number is incremented
 // only inside the successful transaction, so failed or aborted attempts never consume one.
 func (r *documentRepository) UpdateDocument(ctx context.Context, projectID string, pageID string, load domainRepo.DocumentLoadFunc, mutate domainRepo.DocumentMutateFunc) (int64, error) {
-	key := r.getKey(projectID, pageID)
-	seqKey := r.getSeqKey(projectID, pageID)
+	key := r.docKey(projectID, pageID)
+	seqKey := r.seqKey(projectID, pageID)
 	dirtyMember := fmt.Sprintf("%s:%s", projectID, pageID)
 
 	var seq int64
@@ -234,10 +234,10 @@ func (r *documentRepository) UpdateDocument(ctx context.Context, projectID strin
 	return 0, fmt.Errorf("document update for page %s aborted after %d conflicting attempts", pageID, maxUpdateRetries)
 }
 
-func (r *documentRepository) getSeqKey(projectID string, pageID string) string {
-	return r.getKey(projectID, pageID) + ":seq"
+func (r *documentRepository) seqKey(projectID string, pageID string) string {
+	return r.docKey(projectID, pageID) + ":seq"
 }
 
-func (r *documentRepository) getKey(projectID string, pageID string) string {
+func (r *documentRepository) docKey(projectID string, pageID string) string {
 	return fmt.Sprintf("page:%s:%s", projectID, pageID)
 }

@@ -211,7 +211,7 @@ func savePageLogic(ctx context.Context, tx *sql.Tx, projectID, pageID string, do
 
 func decodeLogic(raw []byte) (logic.Document, error) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return logic.Empty(), nil
+		return logic.NewEmptyDocument(), nil
 	}
 	var doc logic.Document
 	if err := json.Unmarshal(raw, &doc); err != nil {
@@ -223,10 +223,10 @@ func decodeLogic(raw []byte) (logic.Document, error) {
 	return doc, nil
 }
 
-// Apply merges a patch into the project (pageID empty) or the specified page.
+// Update merges a patch into the project (pageID empty) or the specified page.
 // Permission is checked inside the write transaction.
 // The document's revision is incremented in the same statement that stores it.
-func (r *LogicRepository) Apply(ctx context.Context, projectID, pageID, userID string, patch map[string]any, nullPaths ...[][]string) (logic.Revisioned, error) {
+func (r *LogicRepository) Update(ctx context.Context, projectID, pageID, userID string, patch map[string]any, nullPaths ...[][]string) (logic.Revisioned, error) {
 	var none logic.Revisioned
 	tx, cleanup, err := r.beginTx(ctx)
 	if err != nil {
@@ -356,9 +356,9 @@ func decodeRevisioned(raw []byte, revision int64) (logic.Revisioned, error) {
 	return logic.Revisioned{Doc: doc, Revision: revision}, nil
 }
 
-// Access returns project read and edit permissions for a user. A viewer may
+// CheckAccess returns project read and edit permissions for a user. A viewer may
 // read but cannot change logic; an owner or editor can do both.
-func (r *LogicRepository) Access(ctx context.Context, projectID, userID string) (bool, bool, error) {
+func (r *LogicRepository) CheckAccess(ctx context.Context, projectID, userID string) (bool, bool, error) {
 	if projectID == "" || userID == "" {
 		return false, false, nil
 	}

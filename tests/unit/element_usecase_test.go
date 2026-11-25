@@ -26,7 +26,7 @@ func (f *fakeDocUseCase) GetDocument(ctx context.Context, projectID string, page
 	return out, nil
 }
 
-func (f *fakeDocUseCase) RefreshCache(ctx context.Context, projectID string, pageID string) error {
+func (f *fakeDocUseCase) EnsureDocumentCached(ctx context.Context, projectID string, pageID string) error {
 	return nil
 }
 
@@ -34,7 +34,7 @@ func (f *fakeDocUseCase) GetDocumentWithSeq(ctx context.Context, projectID strin
 	return f.doc, f.seq, nil
 }
 
-func (f *fakeDocUseCase) MutateDocument(ctx context.Context, projectID string, pageID string, mutate domainRepo.DocumentMutateFunc) (int64, error) {
+func (f *fakeDocUseCase) UpdateDocument(ctx context.Context, projectID string, pageID string, mutate domainRepo.DocumentMutateFunc) (int64, error) {
 	out := make([]entity.Element, len(f.doc))
 	copy(out, f.doc)
 	updated, err := mutate(out)
@@ -50,7 +50,7 @@ func (f *fakeDocUseCase) MutateDocument(ctx context.Context, projectID string, p
 	return f.seq, nil
 }
 
-func (f *fakeDocUseCase) AddElementsToDocument(ctx context.Context, projectID string, pageID string, elements []entity.Element) error {
+func (f *fakeDocUseCase) SetDocument(ctx context.Context, projectID string, pageID string, elements []entity.Element) error {
 	// store a copy for assertions
 	f.added = make([]entity.Element, len(elements))
 	copy(f.added, elements)
@@ -235,8 +235,8 @@ func TestRemoveElement_UseCase(t *testing.T) {
 	doc.persist = prst
 	uc := usecase.NewElementUseCase(&domainRepo.Repository{}, doc, prst)
 
-	if _, err := uc.RemoveElement(ctx, "proj2", "page2", "grand"); err != nil {
-		t.Fatalf("unexpected error from RemoveElement: %v", err)
+	if _, err := uc.DeleteElement(ctx, "proj2", "page2", "grand"); err != nil {
+		t.Fatalf("unexpected error from DeleteElement: %v", err)
 	}
 
 	if doc.added == nil {

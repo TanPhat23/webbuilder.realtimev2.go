@@ -30,9 +30,9 @@ const (
 	msgInvalidPayload = "Unauthorized: Invalid ticket payload"
 )
 
-// AuthMiddleware authenticates /ws upgrade requests exclusively via single-use Redis ?ticket=
+// Authenticate authenticates /ws upgrade requests exclusively via single-use Redis ?ticket=
 // credentials (or DEV_MODE in non-production environments).
-func AuthMiddleware(cfg *config.Config, rdb ...*redis.Client) fiber.Handler {
+func Authenticate(cfg *config.Config, rdb ...*redis.Client) fiber.Handler {
 	var redisClient *redis.Client
 	if len(rdb) > 0 {
 		redisClient = rdb[0]
@@ -40,15 +40,15 @@ func AuthMiddleware(cfg *config.Config, rdb ...*redis.Client) fiber.Handler {
 
 	// Fail closed if DEV_MODE is enabled in production/staging or with a live Clerk key.
 	if cfg != nil && cfg.IsUnsafeDevMode() {
-		logger.Default().Errorf("AuthMiddleware: DEV_MODE is forbidden in production/staging or with live Clerk key")
-		return func(c *fiber.Ctx) error { return abort(c, fiber.StatusInternalServerError, msgUnsafeDevMode) }
+		logger.Default().Errorf("Authenticate: DEV_MODE is forbidden in production/staging or with live Clerk key")
+		return func(c *fiber.Ctx) error { return writeAuthError(c, fiber.StatusInternalServerError, msgUnsafeDevMode) }
 	}
 
 	userClient := newClerkUserClient(cfg)
 
 	return func(c *fiber.Ctx) error {
 		if cfg != nil && cfg.IsUnsafeDevMode() {
-			return abort(c, fiber.StatusInternalServerError, msgUnsafeDevMode)
+			return writeAuthError(c, fiber.StatusInternalServerError, msgUnsafeDevMode)
 		}
 		if cfg != nil && cfg.DevMode {
 			return authenticateDevUser(c)
@@ -57,7 +57,7 @@ func AuthMiddleware(cfg *config.Config, rdb ...*redis.Client) fiber.Handler {
 	}
 }
 
-func abort(c *fiber.Ctx, status int, message string) error {
+func writeAuthError(c *fiber.Ctx, status int, message string) error {
 	return c.Status(status).JSON(fiber.Map{"error": message})
 }
 
@@ -70,8 +70,8 @@ func newClerkUserClient(cfg *config.Config) *user.Client {
 	return user.NewClient(clerkCfg)
 }
 
-// proceed stores the authenticated user for downstream handlers.
-func proceed(c *fiber.Ctx, u *entity.User) error {
+// attachAuthenticatedUser stores the authenticated user for downstream handlers.
+func attachAuthenticatedUser(c *fiber.Ctx, u *entity.User) error {
 	c.Locals("userId", u.ID)
 	c.Locals("user", u)
 	return c.Next()
@@ -87,27 +87,27 @@ func authenticateDevUser(c *fiber.Ctx) error {
 	if override := c.Query("devUser", c.Get("X-Dev-User")); override != "" {
 		devUserID = override
 	}
-	logger.Default().Debugf("AuthMiddleware: DevMode active, using UserID: %s", devUserID)
-	return proceed(c, &entity.User{ID: devUserID, Email: "dev@example.com"})
+	logger.Default().Debugf("Authenticate: DevMode active, using UserID: %s", devUserID)
+	return attachAuthenticatedUser(c, &entity.User{ID: devUserID, Email: "dev@example.com"})
 }
 
 func authenticateWSTicket(c *fiber.Ctx, rdb *redis.Client, userClient *user.Client) error {
 	ticket := strings.TrimSpace(c.Query("ticket"))
 	if ticket == "" {
-		return abort(c, fiber.StatusUnauthorized, msgMissingTicket)
+		return writeAuthError(c, fiber.StatusUnauthorized, msgMissingTicket)
 	}
 	if rdb == nil {
-		return abort(c, fiber.StatusInternalServerError, msgNoTicketStore)
+		return writeAuthError(c, fiber.StatusInternalServerError, msgNoTicketStore)
 	}
-	if !validation.IsValidSafeID(ticket) {
-		return abort(c, fiber.StatusUnauthorized, msgInvalidTicket)
+	if !validation.IsSafeID(ticket) {
+		return writeAuthError(c, fiber.StatusUnauthorized, msgInvalidTicket)
 	}
 
 	sum := sha256.Sum256([]byte(ticket))
 	value, err := rdb.GetDel(c.UserContext(), wsTicketRedisPrefix+hex.EncodeToString(sum[:])).Result()
 	value = strings.TrimSpace(value)
 	if err != nil || value == "" {
-		return abort(c, fiber.StatusUnauthorized, msgInvalidTicket)
+		return writeAuthError(c, fiber.StatusUnauthorized, msgInvalidTicket)
 	}
 
 	if strings.HasPrefix(value, "{") {
@@ -117,7 +117,7 @@ func authenticateWSTicket(c *fiber.Ctx, rdb *redis.Client, userClient *user.Clie
 	if userClient != nil {
 		enrichClerkUser(c.UserContext(), userClient, mapped)
 	}
-	return proceed(c, mapped)
+	return attachAuthenticatedUser(c, mapped)
 }
 
 type wsTicketPayload struct {
@@ -133,14 +133,14 @@ type wsTicketPayload struct {
 func authenticateTicketPayload(c *fiber.Ctx, userClient *user.Client, value string) error {
 	var payload wsTicketPayload
 	if err := json.Unmarshal([]byte(value), &payload); err != nil {
-		return abort(c, fiber.StatusUnauthorized, msgInvalidPayload)
+		return writeAuthError(c, fiber.StatusUnauthorized, msgInvalidPayload)
 	}
 	uid := payload.UserID
 	if uid == "" {
 		uid = payload.ID
 	}
 	if uid == "" {
-		return abort(c, fiber.StatusUnauthorized, msgInvalidPayload)
+		return writeAuthError(c, fiber.StatusUnauthorized, msgInvalidPayload)
 	}
 	mapped := &entity.User{
 		ID:        uid,
@@ -155,7 +155,7 @@ func authenticateTicketPayload(c *fiber.Ctx, userClient *user.Client, value stri
 	if payload.ProjectID != "" {
 		c.Locals("ticketProjectId", payload.ProjectID)
 	}
-	return proceed(c, mapped)
+	return attachAuthenticatedUser(c, mapped)
 }
 
 type clerkUserPayload struct {

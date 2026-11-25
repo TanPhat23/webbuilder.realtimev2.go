@@ -23,15 +23,15 @@ func ParentsEqual(p1, p2 *string) bool {
 	return *p1 == *p2
 }
 
-func CompareParent(p *string, id string) bool {
+func HasParent(p *string, id string) bool {
 	if p == nil {
 		return id == ""
 	}
 	return *p == id
 }
 
-// FlattenElements flattens nested Elements for database operations.
-func FlattenElements(elements []entity.Element) []entity.Element {
+// Flatten flattens nested Elements for database operations.
+func Flatten(elements []entity.Element) []entity.Element {
 	result := make([]entity.Element, 0, len(elements))
 	flatten(elements, 1, &result)
 	return result
@@ -52,8 +52,8 @@ func flatten(elements []entity.Element, depth int, result *[]entity.Element) {
 	}
 }
 
-// BuildElementTree converts a flat list of elements into a hierarchical tree based on ParentID.
-func BuildElementTree(elements []entity.Element) []entity.Element {
+// BuildTree converts a flat list of elements into a hierarchical tree based on ParentID.
+func BuildTree(elements []entity.Element) []entity.Element {
 	if len(elements) == 0 {
 		return nil
 	}
@@ -150,7 +150,7 @@ func assembleElementForest(roots []string, elementMap map[string]entity.Element,
 	return result
 }
 
-func UpdateElement(root *entity.Element, updated entity.Element) bool {
+func Update(root *entity.Element, updated entity.Element) bool {
 	if root == nil {
 		return false
 	}
@@ -159,14 +159,14 @@ func UpdateElement(root *entity.Element, updated entity.Element) bool {
 		return true
 	}
 	for i := range root.Elements {
-		if UpdateElement(&root.Elements[i], updated) {
+		if Update(&root.Elements[i], updated) {
 			return true
 		}
 	}
 	return false
 }
 
-func DeleteElement(root *entity.Element, id string) bool {
+func Delete(root *entity.Element, id string) bool {
 	if root == nil {
 		return false
 	}
@@ -177,14 +177,14 @@ func DeleteElement(root *entity.Element, id string) bool {
 		}
 	}
 	for i := range root.Elements {
-		if DeleteElement(&root.Elements[i], id) {
+		if Delete(&root.Elements[i], id) {
 			return true
 		}
 	}
 	return false
 }
 
-func SwapElements(root *entity.Element, id1, id2 string) bool {
+func Swap(root *entity.Element, id1, id2 string) bool {
 	if root == nil {
 		return false
 	}
@@ -202,14 +202,14 @@ func SwapElements(root *entity.Element, id1, id2 string) bool {
 	}
 
 	for i := range root.Elements {
-		if SwapElements(&root.Elements[i], id1, id2) {
+		if Swap(&root.Elements[i], id1, id2) {
 			return true
 		}
 	}
 	return false
 }
 
-func CreateElement(root *entity.Element, newElement entity.Element) bool {
+func InsertChild(root *entity.Element, newElement entity.Element) bool {
 	if root == nil {
 		return false
 	}
@@ -219,7 +219,7 @@ func CreateElement(root *entity.Element, newElement entity.Element) bool {
 		return true
 	}
 	for i := range root.Elements {
-		if CreateElement(&root.Elements[i], newElement) {
+		if InsertChild(&root.Elements[i], newElement) {
 			return true
 		}
 	}

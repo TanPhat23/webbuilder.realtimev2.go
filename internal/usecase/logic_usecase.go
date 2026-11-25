@@ -34,7 +34,7 @@ func mapLogicError(err error) error {
 }
 
 func (u *logicUseCase) Update(ctx context.Context, projectID, pageID, userID string, patch map[string]any, nullPaths ...[][]string) (logic.Revisioned, error) {
-	doc, err := u.repo.Apply(ctx, projectID, pageID, userID, patch, nullPaths...)
+	doc, err := u.repo.Update(ctx, projectID, pageID, userID, patch, nullPaths...)
 	if err != nil {
 		return logic.Revisioned{}, mapLogicError(err)
 	}
@@ -57,6 +57,6 @@ func (u *logicUseCase) Get(ctx context.Context, projectID, pageID, userID string
 	return project, page, nil
 }
 
-func (u *logicUseCase) Access(ctx context.Context, projectID, userID string) (bool, bool, error) {
-	return u.repo.Access(ctx, projectID, userID)
+func (u *logicUseCase) CheckAccess(ctx context.Context, projectID, userID string) (bool, bool, error) {
+	return u.repo.CheckAccess(ctx, projectID, userID)
 }

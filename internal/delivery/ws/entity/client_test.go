@@ -37,7 +37,7 @@ func TestClient_SetAndGetPresence_AgentLifecycle(t *testing.T) {
 	agentEl = "mutated"
 	payload.Agent.Name = "Mutated"
 
-	got := client.GetPresence()
+	got := client.Presence()
 	if got.CursorX != 100 || got.CursorY != 200 {
 		t.Fatalf("unexpected cursor: (%v, %v)", got.CursorX, got.CursorY)
 	}
@@ -45,7 +45,7 @@ func TestClient_SetAndGetPresence_AgentLifecycle(t *testing.T) {
 		t.Fatalf("expected ElementID=el-human-selection, got %v", got.ElementID)
 	}
 	if got.Agent == nil {
-		t.Fatalf("expected Agent to be preserved on GetPresence")
+		t.Fatalf("expected Agent to be preserved on Presence")
 	}
 	if !got.Agent.Active || got.Agent.Name != "Canvas Copilot" || got.Agent.Status != "editing" || got.Agent.Action != "Styling header" {
 		t.Fatalf("unexpected Agent: %+v", got.Agent)
@@ -54,12 +54,12 @@ func TestClient_SetAndGetPresence_AgentLifecycle(t *testing.T) {
 		t.Fatalf("expected Agent.ElementID=el-agent-target, got %v", got.Agent.ElementID)
 	}
 
-	// Verify Room.GetParticipants preserves Agent in sync snapshots.
+	// Verify Room.Participants preserves Agent in sync snapshots.
 	room := &Room{
 		PageID:  client.RoomID(),
 		clients: map[*Client]bool{client: true},
 	}
-	participants := room.GetParticipants()
+	participants := room.Participants()
 	if len(participants) != 1 {
 		t.Fatalf("expected 1 participant, got %d", len(participants))
 	}
@@ -67,7 +67,7 @@ func TestClient_SetAndGetPresence_AgentLifecycle(t *testing.T) {
 		t.Fatalf("expected participant presence to include Agent, got %+v", participants[0].Presence.Agent)
 	}
 
-	// Verify BroadcastPresence preserves Agent in broadcast payload.
+	// Verify NewPresenceMessage preserves Agent in broadcast payload.
 	broadcastPayload := domainEntity.PayloadPresence{
 		UserID:   "user-1",
 		UserName: "Alice",
@@ -75,16 +75,16 @@ func TestClient_SetAndGetPresence_AgentLifecycle(t *testing.T) {
 		CursorY:  200,
 		Agent:    got.Agent,
 	}
-	msg, err := client.Factory().BroadcastPresence(broadcastPayload)
+	msg, err := client.NewMessageFactory().NewPresenceMessage(broadcastPayload)
 	if err != nil {
-		t.Fatalf("BroadcastPresence error: %v", err)
+		t.Fatalf("NewPresenceMessage error: %v", err)
 	}
 	var decoded domainEntity.PayloadPresence
 	if err := json.Unmarshal(msg.Payload, &decoded); err != nil {
-		t.Fatalf("unmarshal BroadcastPresence payload: %v", err)
+		t.Fatalf("unmarshal NewPresenceMessage payload: %v", err)
 	}
 	if decoded.Agent == nil || decoded.Agent.Name != "Canvas Copilot" {
-		t.Fatalf("expected BroadcastPresence to preserve Agent, got %+v", decoded.Agent)
+		t.Fatalf("expected NewPresenceMessage to preserve Agent, got %+v", decoded.Agent)
 	}
 
 	// Clearing Agent when subsequent presence update omits Agent.
@@ -94,7 +94,7 @@ func TestClient_SetAndGetPresence_AgentLifecycle(t *testing.T) {
 		CursorX:  150,
 		CursorY:  250,
 	})
-	cleared := client.GetPresence()
+	cleared := client.Presence()
 	if cleared.Agent != nil {
 		t.Fatalf("expected Agent to be cleared when omitted, got %+v", cleared.Agent)
 	}

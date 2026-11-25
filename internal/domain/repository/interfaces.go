@@ -25,13 +25,13 @@ type ElementRepository interface {
 	UpsertElements(ctx context.Context, projectID string, pageID string, elements []entity.Element) error
 	DeleteElement(ctx context.Context, projectID string, pageID string, elementID string) error
 	GetElementByID(ctx context.Context, projectID string, pageID string, elementID string) (*entity.Element, error)
-	GetElementsByPageID(ctx context.Context, projectID string, pageID string) ([]entity.Element, error)
-	GetElementsByProjectID(ctx context.Context, projectID string) ([]entity.Element, error)
+	ListElementsByPage(ctx context.Context, projectID string, pageID string) ([]entity.Element, error)
+	ListElementsByProject(ctx context.Context, projectID string) ([]entity.Element, error)
 	PageBelongsToProject(ctx context.Context, projectID string, pageID string) (bool, error)
 }
 
 type SnapshotRepository interface {
-	SaveSnapshot(ctx context.Context, pageID, projectID, name string, snapshotType entity.SnapshotType, elements []entity.Element) error
+	CreateSnapshot(ctx context.Context, pageID, projectID, name string, snapshotType entity.SnapshotType, elements []entity.Element) error
 	GetSnapshot(ctx context.Context, pageID, projecID string, snapshotType entity.SnapshotType) (*entity.Snapshot, error)
 	DeleteSnapshot(ctx context.Context, pageID, projectID string, snapshotType entity.SnapshotType) error
 }
@@ -61,7 +61,7 @@ type WorkflowRepository interface {
 	UpdateWorkflow(ctx context.Context, projectID string, workflow *entity.EventWorkflow) error
 	DeleteWorkflow(ctx context.Context, projectID string, workflowID string) error
 	GetWorkflowByID(ctx context.Context, projectID string, workflowID string) (*entity.EventWorkflow, error)
-	GetWorkflowsByProjectID(ctx context.Context, projectID string) ([]entity.EventWorkflow, error)
+	ListWorkflowsByProject(ctx context.Context, projectID string) ([]entity.EventWorkflow, error)
 }
 
 type ProjectRepository interface {
@@ -76,20 +76,20 @@ type ElementWorkflowRepository interface {
 	UpdateElementWorkflow(ctx context.Context, projectID string, workflow *entity.ElementEventWorkflow) error
 	DeleteElementWorkflow(ctx context.Context, projectID string, elementID string) error
 	GetElementWorkflowByElementID(ctx context.Context, projectID string, elementID string) (*entity.ElementEventWorkflow, error)
-	GetElementWorkflowsByProjectID(ctx context.Context, projectID string) ([]entity.ElementEventWorkflow, error)
-	GetElementWorkflowsByPageID(ctx context.Context, projectID string, pageID string) ([]entity.ElementEventWorkflow, error)
+	ListElementWorkflowsByProject(ctx context.Context, projectID string) ([]entity.ElementEventWorkflow, error)
+	ListElementWorkflowsByPage(ctx context.Context, projectID string, pageID string) ([]entity.ElementEventWorkflow, error)
 }
 
 // LogicRepository stores the project's and pages' logic documents.
 type LogicRepository interface {
 	Move(ctx context.Context, projectID, pageID, userID, kind, name, to string) (project logic.Revisioned, page logic.Revisioned, err error)
-	// Apply merges patch into the project (pageID empty) or page logic after
+	// Update merges patch into the project (pageID empty) or page logic after
 	// checking the user may edit, and returns the resulting document and its new revision.
-	Apply(ctx context.Context, projectID, pageID, userID string, patch map[string]any, nullPaths ...[][]string) (logic.Revisioned, error)
+	Update(ctx context.Context, projectID, pageID, userID string, patch map[string]any, nullPaths ...[][]string) (logic.Revisioned, error)
 	// Get returns the project and page documents and revisions after checking the user may read.
 	Get(ctx context.Context, projectID, pageID, userID string) (project logic.Revisioned, page logic.Revisioned, err error)
-	// Access reports whether the user may read and may edit the project.
-	Access(ctx context.Context, projectID, userID string) (read bool, write bool, err error)
+	// CheckAccess reports whether the user may read and may edit the project.
+	CheckAccess(ctx context.Context, projectID, userID string) (read bool, write bool, err error)
 }
 
 type Repository struct {

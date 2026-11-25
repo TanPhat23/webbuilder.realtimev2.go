@@ -21,14 +21,14 @@ var (
 	safeIDRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 )
 
-// IsValidSafeID reports whether id is a safe 1..128 character identifier containing
+// IsSafeID reports whether id is a safe 1..128 character identifier containing
 // only ASCII letters, digits, underscores, and hyphens (no ':', slashes, whitespace, or control chars).
-func IsValidSafeID(id string) bool {
+func IsSafeID(id string) bool {
 	return safeIDRE.MatchString(id)
 }
 
-// ValidateElementTree enforces depth (max 32) and total node count (max 2000) bounds on an element tree.
-func ValidateElementTree(e *domainEntity.Element) error {
+// ElementTree enforces depth (max 32) and total node count (max 2000) bounds on an element tree.
+func ElementTree(e *domainEntity.Element) error {
 	if e == nil {
 		return nil
 	}
@@ -73,7 +73,7 @@ func init() {
 	})
 }
 
-func ValidatePresence(p *domainEntity.PayloadPresence) error {
+func Presence(p *domainEntity.PayloadPresence) error {
 	if p == nil {
 		return fmt.Errorf("payload is nil")
 	}
@@ -83,16 +83,16 @@ func ValidatePresence(p *domainEntity.PayloadPresence) error {
 	return nil
 }
 
-// ValidateElementCreate validates the payload for adding a new element to the canvas
-func ValidateElementCreate(p *domainEntity.PayloadElementCreate) error {
+// ElementCreate validates the payload for adding a new element to the canvas
+func ElementCreate(p *domainEntity.PayloadElementCreate) error {
 	if p == nil {
 		return fmt.Errorf("payload is nil")
 	}
-	return ValidateElementForAdd(&p.Element)
+	return ElementForCreate(&p.Element)
 }
 
-// ValidateElementUpdate validates granular updates to properties or styles
-func ValidateElementUpdate(p *domainEntity.PayloadElementUpdate) error {
+// ElementUpdate validates granular updates to properties or styles
+func ElementUpdate(p *domainEntity.PayloadElementUpdate) error {
 	if p == nil {
 		return fmt.Errorf("payload is nil")
 	}
@@ -102,8 +102,8 @@ func ValidateElementUpdate(p *domainEntity.PayloadElementUpdate) error {
 	return nil
 }
 
-// ValidateElementMove validates reordering or reparenting an element
-func ValidateElementMove(p *domainEntity.PayloadElementMove) error {
+// ElementMove validates reordering or reparenting an element
+func ElementMove(p *domainEntity.PayloadElementMove) error {
 	if p == nil {
 		return fmt.Errorf("payload is nil")
 	}
@@ -121,8 +121,8 @@ func ValidateElementMove(p *domainEntity.PayloadElementMove) error {
 	return nil
 }
 
-// ValidateElementDelete validates removal of an element
-func ValidateElementDelete(p *domainEntity.PayloadElementDelete) error {
+// ElementDelete validates removal of an element
+func ElementDelete(p *domainEntity.PayloadElementDelete) error {
 	if p == nil {
 		return fmt.Errorf("payload is nil")
 	}
@@ -132,8 +132,8 @@ func ValidateElementDelete(p *domainEntity.PayloadElementDelete) error {
 	return nil
 }
 
-// ValidateElementContent validates real-time text content updates
-func ValidateElementContent(p *domainEntity.PayloadElementContent) error {
+// ElementContent validates real-time text content updates
+func ElementContent(p *domainEntity.PayloadElementContent) error {
 	if p == nil {
 		return fmt.Errorf("payload is nil")
 	}
@@ -143,8 +143,8 @@ func ValidateElementContent(p *domainEntity.PayloadElementContent) error {
 	return nil
 }
 
-// ValidateComment validates a new or updated comment
-func ValidateComment(p *domainEntity.PayloadComment) error {
+// Comment validates a new or updated comment
+func Comment(p *domainEntity.PayloadComment) error {
 	if p == nil {
 		return fmt.Errorf("payload is nil")
 	}
@@ -157,49 +157,49 @@ func ValidateComment(p *domainEntity.PayloadComment) error {
 	return nil
 }
 
-	// ValidateElementForAdd validates an Element struct for creation
-	func ValidateElementForAdd(e *domainEntity.Element) error {
-		if e == nil {
-			return fmt.Errorf("element is nil")
+// ElementForCreate validates an Element struct for creation
+func ElementForCreate(e *domainEntity.Element) error {
+	if e == nil {
+		return fmt.Errorf("element is nil")
+	}
+	// We check core fields for creation
+	if e.Type == "" {
+		return fmt.Errorf("element type is required")
+	}
+	if e.PageID == "" {
+		return fmt.Errorf("pageId is required")
+	}
+	if !IsSafeID(e.PageID) {
+		return fmt.Errorf("invalid pageId")
+	}
+	if err := ElementTree(e); err != nil {
+		return err
+	}
+	var savedParent *string
+	if e.ParentID != nil {
+		// Treat an empty string or the special 'root' identifier as 'no parent'
+		// for validation purposes so that clients can reference 'root' without
+		// failing the UUID validation rule.
+		v := strings.TrimSpace(*e.ParentID)
+		if v == "" || v == "root" {
+			savedParent = e.ParentID
+			e.ParentID = nil
 		}
-		// We check core fields for creation
-		if e.Type == "" {
-			return fmt.Errorf("element type is required")
-		}
-		if e.PageID == "" {
-			return fmt.Errorf("pageId is required")
-		}
-		if !IsValidSafeID(e.PageID) {
-			return fmt.Errorf("invalid pageId")
-		}
-		if err := ValidateElementTree(e); err != nil {
-			return err
-		}
-		var savedParent *string
-		if e.ParentID != nil {
-			// Treat an empty string or the special 'root' identifier as 'no parent'
-			// for validation purposes so that clients can reference 'root' without
-			// failing the UUID validation rule.
-			v := strings.TrimSpace(*e.ParentID)
-			if v == "" || v == "root" {
-				savedParent = e.ParentID
-				e.ParentID = nil
-			}
-		}
-		if err := validate.Struct(e); err != nil {
-			// restore before returning
-			if savedParent != nil {
-				e.ParentID = savedParent
-			}
-			return fmt.Errorf("invalid element for add: %w", err)
-		}
+	}
+	if err := validate.Struct(e); err != nil {
+		// restore before returning
 		if savedParent != nil {
 			e.ParentID = savedParent
 		}
-		return nil
+		return fmt.Errorf("invalid element for add: %w", err)
 	}
+	if savedParent != nil {
+		e.ParentID = savedParent
+	}
+	return nil
+}
 
-func ValidateElementForUpdate(e *domainEntity.Element) error {
+func ElementForUpdate(e *domainEntity.Element) error {
 	if e == nil {
 		return fmt.Errorf("element is nil")
 	}

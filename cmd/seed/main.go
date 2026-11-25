@@ -10,7 +10,7 @@ import (
 
 func main() {
 	// Load configuration from environment variables
-	cfg, err := config.LoadConfig()
+	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Could not load configuration: %v", err)
 	}
@@ -35,27 +35,27 @@ func main() {
 		command = os.Args[1]
 	}
 
-	seeder := seed.NewSeedData(db)
+	seeder := seed.NewSeeder(db)
 
 	switch command {
 	case "user":
 		log.Println("Seeding users...")
-		if err := seed.SeedUsers(db); err != nil {
+		if err := seed.Users(db); err != nil {
 			log.Fatalf("Failed to seed users: %v", err)
 		}
 	case "project":
 		log.Println("Seeding projects (including pages and elements)...")
-		if err := seed.SeedProjects(db); err != nil {
+		if err := seed.Projects(db); err != nil {
 			log.Fatalf("Failed to seed projects: %v", err)
 		}
 	case "workflow":
 		log.Println("Seeding workflows...")
-		if err := seed.SeedWorkflows(db); err != nil {
+		if err := seed.Workflows(db); err != nil {
 			log.Fatalf("Failed to seed workflows: %v", err)
 		}
 	case "all", "":
 		log.Println("Initializing full database seeding...")
-		if err := seeder.Run(); err != nil {
+		if err := seeder.SeedAll(); err != nil {
 			log.Fatalf("Seeding process failed: %v", err)
 		}
 	default:

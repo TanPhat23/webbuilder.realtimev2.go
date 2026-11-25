@@ -32,44 +32,44 @@ func NewMessageFactory(projectID, pageID string, userID ...string) *MessageFacto
 	}
 }
 
-// CreateElement constructs a message for new element additions.
-func (f *MessageFactory) CreateElement(element domainEntity.Element) (domainEntity.Message, error) {
+// NewElementCreatedMessage constructs a message for new element additions.
+func (f *MessageFactory) NewElementCreatedMessage(element domainEntity.Element) (domainEntity.Message, error) {
 	element = sanitizeElements([]domainEntity.Element{element})[0]
-	return f.Create(domainEntity.TypeElementCreate, domainEntity.PayloadElementCreate{
+	return f.NewMessage(domainEntity.TypeElementCreate, domainEntity.PayloadElementCreate{
 		Element: element,
 	})
 }
 
-// UpdateElement constructs a message for granular property or style changes.
-func (f *MessageFactory) UpdateElement(payload domainEntity.PayloadElementUpdate) (domainEntity.Message, error) {
-	return f.Create(domainEntity.TypeElementUpdate, payload)
+// NewElementUpdatedMessage constructs a message for granular property or style changes.
+func (f *MessageFactory) NewElementUpdatedMessage(payload domainEntity.PayloadElementUpdate) (domainEntity.Message, error) {
+	return f.NewMessage(domainEntity.TypeElementUpdate, payload)
 }
 
-// DeleteElement constructs a message for element removals.
-func (f *MessageFactory) DeleteElement(elementID string) (domainEntity.Message, error) {
-	return f.Create(domainEntity.TypeElementDelete, domainEntity.PayloadElementDelete{
+// NewElementDeletedMessage constructs a message for element removals.
+func (f *MessageFactory) NewElementDeletedMessage(elementID string) (domainEntity.Message, error) {
+	return f.NewMessage(domainEntity.TypeElementDelete, domainEntity.PayloadElementDelete{
 		ID: elementID,
 	})
 }
 
-// MoveElement constructs a message for reordering or reparenting elements.
-func (f *MessageFactory) MoveElement(payload domainEntity.PayloadElementMove) (domainEntity.Message, error) {
-	return f.Create(domainEntity.TypeElementMove, payload)
+// NewElementMovedMessage constructs a message for reordering or reparenting elements.
+func (f *MessageFactory) NewElementMovedMessage(payload domainEntity.PayloadElementMove) (domainEntity.Message, error) {
+	return f.NewMessage(domainEntity.TypeElementMove, payload)
 }
 
-// SyncPage constructs a synchronization message with the full page state.
+// NewPageSyncMessage constructs a synchronization message with the full page state.
 // Workflows (project-level) are intentionally excluded from page-level syncs.
 //
 // Sanitizes elements prior to creating the message so all required properties
 // are present for the frontend (prevents missing properties from causing UI hangs).
-func (f *MessageFactory) SyncPage(elements []domainEntity.Element, elementWorkflows []domainEntity.ElementEventWorkflow, users []domainEntity.UserPresence) (domainEntity.Message, error) {
-	return f.SyncPageAt(elements, elementWorkflows, users, 0)
+func (f *MessageFactory) NewPageSyncMessage(elements []domainEntity.Element, elementWorkflows []domainEntity.ElementEventWorkflow, users []domainEntity.UserPresence) (domainEntity.Message, error) {
+	return f.NewPageSyncAtMessage(elements, elementWorkflows, users, 0)
 }
 
-// SyncPageAt is SyncPage that also carries the page's current op sequence number.
-func (f *MessageFactory) SyncPageAt(elements []domainEntity.Element, elementWorkflows []domainEntity.ElementEventWorkflow, users []domainEntity.UserPresence, seq int64) (domainEntity.Message, error) {
+// NewPageSyncAtMessage is NewPageSyncMessage that also carries the page's current op sequence number.
+func (f *MessageFactory) NewPageSyncAtMessage(elements []domainEntity.Element, elementWorkflows []domainEntity.ElementEventWorkflow, users []domainEntity.UserPresence, seq int64) (domainEntity.Message, error) {
 	sanitized := sanitizeElements(elements)
-	return f.Create(domainEntity.TypeSync, domainEntity.PayloadSync{
+	return f.NewMessage(domainEntity.TypeSync, domainEntity.PayloadSync{
 		Elements:         sanitized,
 		ElementWorkflows: elementWorkflows,
 		Users:            users,
@@ -118,8 +118,8 @@ func sanitizeElements(elements []domainEntity.Element) []domainEntity.Element {
 	return out
 }
 
-func (f *MessageFactory) SyncProject(elements []domainEntity.Element, workflows []domainEntity.EventWorkflow, elementWorkflows []domainEntity.ElementEventWorkflow, users []domainEntity.UserPresence) (domainEntity.Message, error) {
-	return f.Create(domainEntity.TypeSyncProject, domainEntity.PayloadSyncProject{
+func (f *MessageFactory) NewProjectSyncMessage(elements []domainEntity.Element, workflows []domainEntity.EventWorkflow, elementWorkflows []domainEntity.ElementEventWorkflow, users []domainEntity.UserPresence) (domainEntity.Message, error) {
+	return f.NewMessage(domainEntity.TypeSyncProject, domainEntity.PayloadSyncProject{
 		Elements:         elements,
 		Workflows:        workflows,
 		ElementWorkflows: elementWorkflows,
@@ -127,76 +127,76 @@ func (f *MessageFactory) SyncProject(elements []domainEntity.Element, workflows 
 	})
 }
 
-// CreateWorkflow constructs a message for new workflow additions.
-func (f *MessageFactory) CreateWorkflow(workflow domainEntity.EventWorkflow) (domainEntity.Message, error) {
-	return f.Create(domainEntity.TypeWorkflowCreate, domainEntity.PayloadWorkflow{
+// NewWorkflowCreatedMessage constructs a message for new workflow additions.
+func (f *MessageFactory) NewWorkflowCreatedMessage(workflow domainEntity.EventWorkflow) (domainEntity.Message, error) {
+	return f.NewMessage(domainEntity.TypeWorkflowCreate, domainEntity.PayloadWorkflow{
 		Workflow: workflow,
 	})
 }
 
-// UpdateWorkflow constructs a message for workflow changes.
-func (f *MessageFactory) UpdateWorkflow(workflow domainEntity.EventWorkflow) (domainEntity.Message, error) {
-	return f.Create(domainEntity.TypeWorkflowUpdate, domainEntity.PayloadWorkflow{
+// NewWorkflowUpdatedMessage constructs a message for workflow changes.
+func (f *MessageFactory) NewWorkflowUpdatedMessage(workflow domainEntity.EventWorkflow) (domainEntity.Message, error) {
+	return f.NewMessage(domainEntity.TypeWorkflowUpdate, domainEntity.PayloadWorkflow{
 		Workflow: workflow,
 	})
 }
 
-// DeleteWorkflow constructs a message for workflow removals.
-func (f *MessageFactory) DeleteWorkflow(workflowID string) (domainEntity.Message, error) {
-	return f.Create(domainEntity.TypeWorkflowDelete, domainEntity.PayloadWorkflowDelete{
+// NewWorkflowDeletedMessage constructs a message for workflow removals.
+func (f *MessageFactory) NewWorkflowDeletedMessage(workflowID string) (domainEntity.Message, error) {
+	return f.NewMessage(domainEntity.TypeWorkflowDelete, domainEntity.PayloadWorkflowDelete{
 		ID: workflowID,
 	})
 }
 
-// CreateElementWorkflow constructs a message for new element-workflow links.
-func (f *MessageFactory) CreateElementWorkflow(workflow domainEntity.ElementEventWorkflow) (domainEntity.Message, error) {
-	return f.Create(domainEntity.TypeElementWorkflowCreate, domainEntity.PayloadElementWorkflow{
+// NewElementWorkflowCreatedMessage constructs a message for new element-workflow links.
+func (f *MessageFactory) NewElementWorkflowCreatedMessage(workflow domainEntity.ElementEventWorkflow) (domainEntity.Message, error) {
+	return f.NewMessage(domainEntity.TypeElementWorkflowCreate, domainEntity.PayloadElementWorkflow{
 		Workflow: workflow,
 	})
 }
 
-// UpdateElementWorkflow constructs a message for element-workflow link changes.
-func (f *MessageFactory) UpdateElementWorkflow(workflow domainEntity.ElementEventWorkflow) (domainEntity.Message, error) {
-	return f.Create(domainEntity.TypeElementWorkflowUpdate, domainEntity.PayloadElementWorkflow{
+// NewElementWorkflowUpdatedMessage constructs a message for element-workflow link changes.
+func (f *MessageFactory) NewElementWorkflowUpdatedMessage(workflow domainEntity.ElementEventWorkflow) (domainEntity.Message, error) {
+	return f.NewMessage(domainEntity.TypeElementWorkflowUpdate, domainEntity.PayloadElementWorkflow{
 		Workflow: workflow,
 	})
 }
 
-// DeleteElementWorkflow constructs a message for element-workflow link removals.
-func (f *MessageFactory) DeleteElementWorkflow(elementID string) (domainEntity.Message, error) {
-	return f.Create(domainEntity.TypeElementWorkflowDelete, domainEntity.PayloadElementWorkflowDelete{
+// NewElementWorkflowDeletedMessage constructs a message for element-workflow link removals.
+func (f *MessageFactory) NewElementWorkflowDeletedMessage(elementID string) (domainEntity.Message, error) {
+	return f.NewMessage(domainEntity.TypeElementWorkflowDelete, domainEntity.PayloadElementWorkflowDelete{
 		ElementID: elementID,
 	})
 }
 
-// LogicChanged constructs the broadcast for a committed logic update.
-func (f *MessageFactory) LogicChanged(payload domainEntity.PayloadLogicChanged) (domainEntity.Message, error) {
-	return f.Create(domainEntity.TypeLogicUpdate, payload)
+// NewLogicChangedMessage constructs the broadcast for a committed logic update.
+func (f *MessageFactory) NewLogicChangedMessage(payload domainEntity.PayloadLogicChanged) (domainEntity.Message, error) {
+	return f.NewMessage(domainEntity.TypeLogicUpdate, payload)
 }
 
-// LogicSync constructs the current logic for a joining or resyncing client.
-func (f *MessageFactory) LogicSync(payload domainEntity.PayloadLogicSync) (domainEntity.Message, error) {
-	return f.Create(domainEntity.TypeLogicSync, payload)
+// NewLogicSyncMessage constructs the current logic for a joining or resyncing client.
+func (f *MessageFactory) NewLogicSyncMessage(payload domainEntity.PayloadLogicSync) (domainEntity.Message, error) {
+	return f.NewMessage(domainEntity.TypeLogicSync, payload)
 }
 
-// BroadcastPresence constructs a message for broadcasting live user activity.
-func (f *MessageFactory) BroadcastPresence(payload domainEntity.PayloadPresence) (domainEntity.Message, error) {
-	return f.Create(domainEntity.TypePresence, payload)
+// NewPresenceMessage constructs a message for broadcasting live user activity.
+func (f *MessageFactory) NewPresenceMessage(payload domainEntity.PayloadPresence) (domainEntity.Message, error) {
+	return f.NewMessage(domainEntity.TypePresence, payload)
 }
 
-// ErrorWithErr constructs a standardized error message and returns an error if marshalling fails.
-func (f *MessageFactory) ErrorWithErr(code, errMsg string) (domainEntity.Message, error) {
+// TryErrorMessage constructs a standardized error message and returns an error if marshalling fails.
+func (f *MessageFactory) TryErrorMessage(code, errMsg string) (domainEntity.Message, error) {
 	payload := domainEntity.PayloadError{
 		Code:    code,
 		Message: errMsg,
 	}
-	return f.Create(domainEntity.TypeError, payload)
+	return f.NewMessage(domainEntity.TypeError, payload)
 }
 
-// ErrorForOp constructs an error message that echoes the failed operation's clientOpId
-// (both on the envelope and in the payload). With an empty clientOpId it equals Error.
-func (f *MessageFactory) ErrorForOp(code, errMsg, clientOpID string) domainEntity.Message {
-	msg, _ := f.Create(domainEntity.TypeError, domainEntity.PayloadError{
+// NewErrorMessageForOp constructs an error message that echoes the failed operation's clientOpId
+// (both on the envelope and in the payload). With an empty clientOpId it equals NewErrorMessage.
+func (f *MessageFactory) NewErrorMessageForOp(code, errMsg, clientOpID string) domainEntity.Message {
+	msg, _ := f.NewMessage(domainEntity.TypeError, domainEntity.PayloadError{
 		Code:       code,
 		Message:    errMsg,
 		ClientOpID: clientOpID,
@@ -205,14 +205,14 @@ func (f *MessageFactory) ErrorForOp(code, errMsg, clientOpID string) domainEntit
 	return msg
 }
 
-// Error constructs a standardized error message.
-// Use ErrorWithErr if you need to propagate marshaling errors.
-func (f *MessageFactory) Error(code, errMsg string) domainEntity.Message {
-	msg, _ := f.ErrorWithErr(code, errMsg)
+// NewErrorMessage constructs a standardized error message.
+// Use TryErrorMessage if you need to propagate marshaling errors.
+func (f *MessageFactory) NewErrorMessage(code, errMsg string) domainEntity.Message {
+	msg, _ := f.TryErrorMessage(code, errMsg)
 	return msg
 }
 
-func (f *MessageFactory) Create(msgType domainEntity.MessageType, payload any) (domainEntity.Message, error) {
+func (f *MessageFactory) NewMessage(msgType domainEntity.MessageType, payload any) (domainEntity.Message, error) {
 	m, err := domainEntity.NewMessage(msgType, f.projectID, f.pageID, payload)
 	if err != nil {
 		return domainEntity.Message{}, fmt.Errorf("failed to create message: %w", err)

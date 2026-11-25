@@ -16,9 +16,9 @@ type Config struct {
 	DB       int
 }
 
-// NewRedisClient initializes a new Redis client.
+// NewClient initializes a new Redis client.
 // It prioritizes the URL (e.g. REDIS_URL) if provided, otherwise it uses the individual host/port fields.
-func NewRedisClient(cfg Config) (*redis.Client, error) {
+func NewClient(cfg Config) (*redis.Client, error) {
 	var options *redis.Options
 
 	if cfg.URL != "" {

@@ -13,21 +13,21 @@ type SeedData struct {
 	db *gorm.DB
 }
 
-func NewSeedData(db *gorm.DB) *SeedData {
+func NewSeeder(db *gorm.DB) *SeedData {
 	return &SeedData{db: db}
 }
 
-// Run performs a full seeding of the database in the correct order
-func (s *SeedData) Run() error {
+// SeedAll performs a full seeding of the database in the correct order
+func (s *SeedData) SeedAll() error {
 	log.Println("Starting full seeding process...")
 
-	if err := SeedUsers(s.db); err != nil {
+	if err := Users(s.db); err != nil {
 		return err
 	}
-	if err := SeedProjects(s.db); err != nil {
+	if err := Projects(s.db); err != nil {
 		return err
 	}
-	if err := SeedWorkflows(s.db); err != nil {
+	if err := Workflows(s.db); err != nil {
 		return err
 	}
 
@@ -35,8 +35,8 @@ func (s *SeedData) Run() error {
 	return nil
 }
 
-// SeedUsers seeds basic user data for testing
-func SeedUsers(db *gorm.DB) error {
+// Users seeds basic user data for testing
+func Users(db *gorm.DB) error {
 	email := "test@example.com"
 	var found int64
 	db.Model(&entity.User{}).Where("email = ?", email).Count(&found)
@@ -48,8 +48,8 @@ func SeedUsers(db *gorm.DB) error {
 	user := &entity.User{
 		ID:        uuid.New().String(),
 		Email:     "test@example.com",
-		FirstName: stringPtr("Test"),
-		LastName:  stringPtr("User"),
+		FirstName: ptr("Test"),
+		LastName:  ptr("User"),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -62,12 +62,12 @@ func SeedUsers(db *gorm.DB) error {
 	return nil
 }
 
-// SeedProjects seeds a sample project along with its pages and elements
-func SeedProjects(db *gorm.DB) error {
+// Projects seeds a sample project along with its pages and elements
+func Projects(db *gorm.DB) error {
 	var user entity.User
 	if err := db.First(&user).Error; err != nil {
 		log.Println("No user found, seeding default user first...")
-		if err := SeedUsers(db); err != nil {
+		if err := Users(db); err != nil {
 			return err
 		}
 		db.First(&user)
@@ -76,10 +76,10 @@ func SeedProjects(db *gorm.DB) error {
 	project := &entity.Project{
 		ID:          uuid.New().String(),
 		Name:        "Test Project",
-		Description: stringPtr("A sample project for testing purposes"),
+		Description: ptr("A sample project for testing purposes"),
 		OwnerID:     user.ID,
 		Published:   false,
-		Subdomain:   stringPtr("test-project"),
+		Subdomain:   ptr("test-project"),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 		Styles:      map[string]any{"backgroundColor": "#ffffff"},
@@ -91,11 +91,11 @@ func SeedProjects(db *gorm.DB) error {
 	}
 	log.Printf("Project seeded: %s", project.Name)
 
-	return SeedPages(db, project.ID)
+	return Pages(db, project.ID)
 }
 
-// SeedPages seeds a home page for a specific project
-func SeedPages(db *gorm.DB, projectID string) error {
+// Pages seeds a home page for a specific project
+func Pages(db *gorm.DB, projectID string) error {
 	page := &entity.Page{
 		ID:        uuid.New().String(),
 		Name:      "Home",
@@ -112,11 +112,11 @@ func SeedPages(db *gorm.DB, projectID string) error {
 	}
 	log.Printf("Page seeded: %s", page.Name)
 
-	return SeedElements(db, page.ID)
+	return Elements(db, page.ID)
 }
 
-// SeedElements seeds a set of basic UI elements for a page
-func SeedElements(db *gorm.DB, pageID string) error {
+// Elements seeds a set of basic UI elements for a page
+func Elements(db *gorm.DB, pageID string) error {
 	containerID := uuid.New().String()
 	elements := []entity.Element{
 		{
@@ -129,7 +129,7 @@ func SeedElements(db *gorm.DB, pageID string) error {
 		{
 			ID:       uuid.New().String(),
 			Type:     "text",
-			Content:  stringPtr("Welcome to WebBuilder"),
+			Content:  ptr("Welcome to WebBuilder"),
 			PageID:   pageID,
 			ParentID: &containerID,
 			Order:    0,
@@ -138,7 +138,7 @@ func SeedElements(db *gorm.DB, pageID string) error {
 		{
 			ID:       uuid.New().String(),
 			Type:     "button",
-			Content:  stringPtr("Click Me"),
+			Content:  ptr("Click Me"),
 			PageID:   pageID,
 			ParentID: &containerID,
 			Order:    1,
@@ -156,12 +156,12 @@ func SeedElements(db *gorm.DB, pageID string) error {
 	return nil
 }
 
-// SeedWorkflows seeds a sample workflow and attaches it to a button element
-func SeedWorkflows(db *gorm.DB) error {
+// Workflows seeds a sample workflow and attaches it to a button element
+func Workflows(db *gorm.DB) error {
 	var project entity.Project
 	if err := db.First(&project).Error; err != nil {
 		log.Println("No project found, seeding project first...")
-		if err := SeedProjects(db); err != nil {
+		if err := Projects(db); err != nil {
 			return err
 		}
 		db.First(&project)
@@ -171,7 +171,7 @@ func SeedWorkflows(db *gorm.DB) error {
 		ID:          uuid.New().String(),
 		ProjectID:   project.ID,
 		Name:        "Alert Workflow",
-		Description: stringPtr("Shows an alert when triggered"),
+		Description: ptr("Shows an alert when triggered"),
 		Enabled:     true,
 		Handlers: []any{
 			map[string]any{
@@ -212,6 +212,6 @@ func SeedWorkflows(db *gorm.DB) error {
 	return nil
 }
 
-func stringPtr(s string) *string {
+func ptr(s string) *string {
 	return &s
 }

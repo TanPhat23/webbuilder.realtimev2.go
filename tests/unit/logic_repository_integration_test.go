@@ -27,7 +27,7 @@ func TestLogicRepositoryConcurrentNamesAndIsolation(t *testing.T) {
 		user        string
 		read, write bool
 	}{{"owner", true, true}, {"editor", true, true}, {"viewer", true, false}, {"stranger", false, false}} {
-		read, write, err := repo.Access(context.Background(), "proj", tc.user)
+		read, write, err := repo.CheckAccess(context.Background(), "proj", tc.user)
 		if err != nil || read != tc.read || write != tc.write {
 			t.Fatalf("%s: access %v/%v: %v", tc.user, read, write, err)
 		}
@@ -39,7 +39,7 @@ func TestLogicRepositoryConcurrentNamesAndIsolation(t *testing.T) {
 		wg.Add(1)
 		go func(page string) {
 			defer wg.Done()
-			_, err := repo.Apply(context.Background(), "proj", page, "editor", patch)
+			_, err := repo.Update(context.Background(), "proj", page, "editor", patch)
 			errors <- err
 		}(id)
 	}
@@ -64,13 +64,13 @@ func TestLogicRepositoryConcurrentNamesAndIsolation(t *testing.T) {
 	if _, _, err := repo.Get(context.Background(), "other", "p1", "stranger"); err == nil {
 		t.Fatal("cross-project read accepted")
 	}
-	if _, err := repo.Apply(context.Background(), "proj", "p1", "viewer", patch); err == nil {
+	if _, err := repo.Update(context.Background(), "proj", "p1", "viewer", patch); err == nil {
 		t.Fatal("viewer can write")
 	}
 	if _, _, err := repo.Get(context.Background(), "proj", "p1", "stranger"); err == nil {
 		t.Fatal("stranger can read")
 	}
-	if _, err := repo.Apply(context.Background(), "other", "p1", "stranger", patch); err == nil {
+	if _, err := repo.Update(context.Background(), "other", "p1", "stranger", patch); err == nil {
 		t.Fatal("cross-project update accepted")
 	}
 }
@@ -98,7 +98,7 @@ func TestLogicRepositoryRevisionsIncreasePerDocument(t *testing.T) {
 	}
 	var last int64
 	for _, name := range []string{"a", "b", "c"} {
-		got, err := repo.Apply(ctx, "proj", "", "owner", map[string]any{"variables": map[string]any{name: map[string]any{"type": "number", "default": float64(0)}}})
+		got, err := repo.Update(ctx, "proj", "", "owner", map[string]any{"variables": map[string]any{name: map[string]any{"type": "number", "default": float64(0)}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,11 +108,11 @@ func TestLogicRepositoryRevisionsIncreasePerDocument(t *testing.T) {
 		last = got.Revision
 	}
 	// An incomplete draft step is stored like the editor creates it.
-	got, err := repo.Apply(ctx, "proj", "p1", "owner", map[string]any{"flows": map[string]any{"f": map[string]any{"do": []any{map[string]any{"show": ""}}}}})
+	got, err := repo.Update(ctx, "proj", "p1", "owner", map[string]any{"flows": map[string]any{"f": map[string]any{"do": []any{map[string]any{"show": ""}}}}})
 	if err != nil || got.Revision != 1 {
 		t.Fatalf("page revision: %+v %v", got, err)
 	}
-	if _, err := repo.Apply(ctx, "proj", "", "owner", map[string]any{"variables": map[string]any{"bad": map[string]any{"type": "number", "default": "x"}}}); err == nil {
+	if _, err := repo.Update(ctx, "proj", "", "owner", map[string]any{"variables": map[string]any{"bad": map[string]any{"type": "number", "default": "x"}}}); err == nil {
 		t.Fatal("invalid patch accepted")
 	}
 	project, page, err = repo.Get(ctx, "proj", "p1", "owner")
@@ -136,10 +136,10 @@ func TestLogicRepositoryIgnoresDeletedPages(t *testing.T) {
 	}
 	repo := repository.NewLogicRepository(db)
 	patch := map[string]any{"variables": map[string]any{"used": map[string]any{"type": "number", "default": float64(0)}}}
-	if _, err := repo.Apply(context.Background(), "proj", "", "owner", patch); err != nil {
+	if _, err := repo.Update(context.Background(), "proj", "", "owner", patch); err != nil {
 		t.Fatalf("deleted page blocked name: %v", err)
 	}
-	if _, err := repo.Apply(context.Background(), "proj", "deleted", "owner", patch); err == nil {
+	if _, err := repo.Update(context.Background(), "proj", "deleted", "owner", patch); err == nil {
 		t.Fatal("updated deleted page")
 	}
 	if _, _, err := repo.Get(context.Background(), "proj", "deleted", "owner"); err == nil {

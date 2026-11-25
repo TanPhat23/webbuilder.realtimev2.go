@@ -83,7 +83,7 @@ func (h *Hub) getOrCreateRoom(roomID string) *Room {
 			h.mu.Unlock()
 		}
 		h.rooms[roomID] = r
-		go r.run()
+		go r.serve()
 	}
 	return r
 }
@@ -258,13 +258,13 @@ func (h *Hub) listenRedis() {
 	}
 }
 
-func (h *Hub) GetRoomParticipants(roomID string) []domainEntity.UserPresence {
+func (h *Hub) RoomParticipants(roomID string) []domainEntity.UserPresence {
 	h.mu.RLock()
 	r := h.rooms[roomID]
 	h.mu.RUnlock()
 
 	if r != nil {
-		return r.GetParticipants()
+		return r.Participants()
 	}
 	return []domainEntity.UserPresence{}
 }

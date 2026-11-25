@@ -8,7 +8,7 @@ import (
 	"webbuilder/internal/utils/logger"
 )
 
-func TestMyLogger_Basic(t *testing.T) {
+func TestStdLogger_Basic(t *testing.T) {
 	var buf bytes.Buffer
 	l := logger.New(&buf, "", 0) // deterministic: no flags
 

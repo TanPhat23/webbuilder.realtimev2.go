@@ -236,8 +236,8 @@ func (r *elementRepository) GetElementByID(ctx context.Context, projectID string
 	return &elem, nil
 }
 
-// GetElementsByPageID retrieves all elements for a specific page, ordered by Order
-func (r *elementRepository) GetElementsByPageID(ctx context.Context, projectID string, pageID string) ([]domainEntity.Element, error) {
+// ListElementsByPage retrieves all elements for a specific page, ordered by Order
+func (r *elementRepository) ListElementsByPage(ctx context.Context, projectID string, pageID string) ([]domainEntity.Element, error) {
 	var elems []domainEntity.Element
 	err := r.db.WithContext(ctx).
 		Model(&domainEntity.Element{}).
@@ -255,8 +255,8 @@ func (r *elementRepository) GetElementsByPageID(ctx context.Context, projectID s
 	return elems, nil
 }
 
-// GetElementsByProjectID retrieves all elements for a specific project
-func (r *elementRepository) GetElementsByProjectID(ctx context.Context, projectID string) ([]domainEntity.Element, error) {
+// ListElementsByProject retrieves all elements for a specific project
+func (r *elementRepository) ListElementsByProject(ctx context.Context, projectID string) ([]domainEntity.Element, error) {
 	var elems []domainEntity.Element
 
 	err := r.db.WithContext(ctx).
