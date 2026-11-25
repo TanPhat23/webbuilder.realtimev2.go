@@ -57,22 +57,34 @@ func BuildElementTree(elements []entity.Element) []entity.Element {
 	if len(elements) == 0 {
 		return nil
 	}
+	elementMap := indexFlatElements(elements)
+	childrenMap, roots := groupElementsByParent(elements, elementMap)
+	for _, cids := range childrenMap {
+		sortElementIDs(cids, elementMap)
+	}
+	sortElementIDs(roots, elementMap)
+	return assembleElementForest(roots, elementMap, childrenMap)
+}
 
+func indexFlatElements(elements []entity.Element) map[string]entity.Element {
 	elementMap := make(map[string]entity.Element, len(elements))
 	for _, el := range elements {
 		el.Elements = nil
 		elementMap[el.ID] = el
 	}
+	return elementMap
+}
 
+// groupElementsByParent returns the child IDs per parent and the root IDs.
+// An element whose parent is not in the set is treated as a root.
+func groupElementsByParent(elements []entity.Element, elementMap map[string]entity.Element) (map[string][]string, []string) {
 	childrenMap := make(map[string][]string)
 	roots := make([]string, 0)
-
 	for _, el := range elements {
 		if el.ParentID == nil || *el.ParentID == "" {
 			roots = append(roots, el.ID)
 			continue
 		}
-
 		pID := *el.ParentID
 		if _, ok := elementMap[pID]; ok {
 			childrenMap[pID] = append(childrenMap[pID], el.ID)
@@ -80,42 +92,21 @@ func BuildElementTree(elements []entity.Element) []entity.Element {
 			roots = append(roots, el.ID)
 		}
 	}
+	return childrenMap, roots
+}
 
-	for pid, cids := range childrenMap {
-		keyed := true
-		for _, id := range cids {
-			if elementMap[id].OrderKey == "" {
-				keyed = false
-				break
-			}
-		}
-		sort.SliceStable(cids, func(i, j int) bool {
-			a := elementMap[cids[i]]
-			b := elementMap[cids[j]]
-			if keyed {
-				if a.OrderKey != b.OrderKey {
-					return a.OrderKey < b.OrderKey
-				}
-				return a.ID < b.ID
-			}
-			if a.Order != b.Order {
-				return a.Order < b.Order
-			}
-			return a.ID < b.ID
-		})
-		childrenMap[pid] = cids
-	}
-
+// sortElementIDs orders ids by OrderKey when every element has one, otherwise by Order; ID breaks ties.
+func sortElementIDs(ids []string, elementMap map[string]entity.Element) {
 	keyed := true
-	for _, id := range roots {
+	for _, id := range ids {
 		if elementMap[id].OrderKey == "" {
 			keyed = false
 			break
 		}
 	}
-	sort.SliceStable(roots, func(i, j int) bool {
-		a := elementMap[roots[i]]
-		b := elementMap[roots[j]]
+	sort.SliceStable(ids, func(i, j int) bool {
+		a := elementMap[ids[i]]
+		b := elementMap[ids[j]]
 		if keyed {
 			if a.OrderKey != b.OrderKey {
 				return a.OrderKey < b.OrderKey
@@ -127,8 +118,10 @@ func BuildElementTree(elements []entity.Element) []entity.Element {
 		}
 		return a.ID < b.ID
 	})
+}
 
-	visited := make(map[string]bool, len(elements))
+func assembleElementForest(roots []string, elementMap map[string]entity.Element, childrenMap map[string][]string) []entity.Element {
+	visited := make(map[string]bool, len(elementMap))
 	totalNodes := 0
 	var build func(id string, depth int) entity.Element
 	build = func(id string, depth int) entity.Element {

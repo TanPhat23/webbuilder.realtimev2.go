@@ -16,65 +16,75 @@ const (
 )
 
 func (h *Handler) handleJoin(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
-	if msg.PageID == "" {
-		return domainErrors.New(domainErrors.CodeValidation, "pageId is required to join", nil)
-	}
-	if !validation.IsValidSafeID(msg.PageID) {
-		return domainErrors.New(domainErrors.CodeValidation, "invalid pageId", nil)
-	}
-
-	if h.pageChecker != nil {
-		belongs, err := h.pageChecker.PageBelongsToProject(ctx, client.ProjectID, msg.PageID)
-		if err != nil {
-			h.logger.Errorf("page ownership check failed for project=%s page=%s: %v", client.ProjectID, msg.PageID, err)
-			return domainErrors.New(domainErrors.CodeInternal, "could not verify page", nil)
-		}
-		if !belongs {
-			return domainErrors.New(domainErrors.CodeNotFound, "page not found in project", nil)
-		}
+	if err := h.validateJoin(ctx, client, msg.PageID); err != nil {
+		return err
 	}
 
 	oldPage := client.GetPageID()
 	if oldPage != "" && oldPage != msg.PageID {
 		_ = h.hub.Unregister(ctx, client)
 	}
-
 	client.SetPageID(msg.PageID)
 	if err := h.hub.Register(ctx, client); err != nil {
 		return err
 	}
 
+	if err := h.sendPageSync(ctx, client, msg.RequestID); err != nil {
+		return err
+	}
+	if err := h.sendLogicSync(ctx, client, msg.RequestID); err != nil {
+		h.logger.Errorf("logic sync on join failed: %v", err)
+	}
+	h.sendProjectSync(ctx, client, msg.RequestID)
+	return nil
+}
+
+func (h *Handler) validateJoin(ctx context.Context, client *wsentity.Client, pageID string) error {
+	if pageID == "" {
+		return domainErrors.New(domainErrors.CodeValidation, "pageId is required to join", nil)
+	}
+	if !validation.IsValidSafeID(pageID) {
+		return domainErrors.New(domainErrors.CodeValidation, "invalid pageId", nil)
+	}
+	if h.pageChecker == nil {
+		return nil
+	}
+	belongs, err := h.pageChecker.PageBelongsToProject(ctx, client.ProjectID, pageID)
+	if err != nil {
+		h.logger.Errorf("page ownership check failed for project=%s page=%s: %v", client.ProjectID, pageID, err)
+		return domainErrors.New(domainErrors.CodeInternal, "could not verify page", nil)
+	}
+	if !belongs {
+		return domainErrors.New(domainErrors.CodeNotFound, "page not found in project", nil)
+	}
+	return nil
+}
+
+func (h *Handler) sendPageSync(ctx context.Context, client *wsentity.Client, requestID string) error {
 	pageID := client.GetPageID()
 	elements, seq, err := h.uc.Element.SyncPageWithSeq(ctx, client.ProjectID, pageID)
 	if err != nil {
 		return err
 	}
 	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByPage(ctx, client.ProjectID, pageID)
-
 	users := h.hub.GetRoomParticipants(client.RoomID())
 	syncMsg, _ := client.Factory().SyncPageAt(elements, elementWorkflows, users, seq)
-	syncMsg.RequestID = msg.RequestID
+	syncMsg.RequestID = requestID
 	_ = client.Send(syncMsg)
-
-	if err := h.sendLogicSync(ctx, client, msg.RequestID); err != nil {
-		h.logger.Errorf("logic sync on join failed: %v", err)
-	}
-
-	projElements, _ := h.uc.Element.GetElementsByProjectID(ctx, client.ProjectID)
-	projWorkflows, _ := h.uc.Workflow.GetWorkflowsByProject(ctx, client.ProjectID)
-	projElementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByProject(ctx, client.ProjectID)
-
-	// Send project sync only to the joining client — NOT broadcast to all rooms.
-	// Broadcasting sync:project to every room on every join creates a message storm
-	// during rapid reconnects (each reconnect triggers a full project sync to ALL
-	// other clients across ALL pages). The joining client needs the project state;
-	// other clients already have it and will receive granular updates via element/workflow
-	// operation broadcasts.
-	syncProjMsg, _ := client.Factory().SyncProject(projElements, projWorkflows, projElementWorkflows, nil)
-	syncProjMsg.RequestID = msg.RequestID
-	_ = client.Send(syncProjMsg)
-
 	return nil
+}
+
+// sendProjectSync sends project state only to the joining client, not to every room.
+// Broadcasting sync:project on every join creates a message storm during rapid
+// reconnects; other clients already have the project state and receive granular
+// updates via element/workflow operation broadcasts.
+func (h *Handler) sendProjectSync(ctx context.Context, client *wsentity.Client, requestID string) {
+	elements, _ := h.uc.Element.GetElementsByProjectID(ctx, client.ProjectID)
+	workflows, _ := h.uc.Workflow.GetWorkflowsByProject(ctx, client.ProjectID)
+	elementWorkflows, _ := h.uc.ElementWorkflows.GetWorkflowsByProject(ctx, client.ProjectID)
+	syncMsg, _ := client.Factory().SyncProject(elements, workflows, elementWorkflows, nil)
+	syncMsg.RequestID = requestID
+	_ = client.Send(syncMsg)
 }
 
 func (h *Handler) handleLeave(ctx context.Context, client *wsentity.Client, msg domainEntity.Message) error {
@@ -97,24 +107,8 @@ func (h *Handler) handlePresence(ctx context.Context, client *wsentity.Client, m
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return domainErrors.Wrap(domainErrors.CodeValidation, err)
 	}
-
-	if len(payload.ElementID) > 128 {
-		return domainErrors.New(domainErrors.CodeValidation, "presence elementId is too long", nil)
-	}
-	if len(payload.Meta) > maxPresenceMetaKeys {
-		return domainErrors.New(domainErrors.CodeValidation, "presence meta exceeds maximum key count", nil)
-	}
-	if len(payload.Meta) > 0 {
-		rawMeta, err := json.Marshal(payload.Meta)
-		if err != nil || len(rawMeta) > maxPresenceMetaBytes {
-			return domainErrors.New(domainErrors.CodeValidation, "presence meta exceeds maximum size", nil)
-		}
-	}
-	if payload.Agent != nil {
-		if len(payload.Agent.Name) > 128 || len(payload.Agent.Status) > 128 || len(payload.Agent.Action) > 256 ||
-			(payload.Agent.ElementID != nil && len(*payload.Agent.ElementID) > 128) {
-			return domainErrors.New(domainErrors.CodeValidation, "presence agent fields exceed maximum length", nil)
-		}
+	if err := validatePresence(payload); err != nil {
+		return err
 	}
 
 	// Enforce server-authenticated identity so clients cannot spoof other users.
@@ -127,6 +121,28 @@ func (h *Handler) handlePresence(ctx context.Context, client *wsentity.Client, m
 
 	broadcastMsg, _ := client.Factory().BroadcastPresence(payload)
 	h.hub.Broadcast(client.RoomID(), broadcastMsg, client)
+	return nil
+}
+
+func validatePresence(payload domainEntity.PayloadPresence) error {
+	if len(payload.ElementID) > 128 {
+		return domainErrors.New(domainErrors.CodeValidation, "presence elementId is too long", nil)
+	}
+	if len(payload.Meta) > maxPresenceMetaKeys {
+		return domainErrors.New(domainErrors.CodeValidation, "presence meta exceeds maximum key count", nil)
+	}
+	if len(payload.Meta) > 0 {
+		rawMeta, err := json.Marshal(payload.Meta)
+		if err != nil || len(rawMeta) > maxPresenceMetaBytes {
+			return domainErrors.New(domainErrors.CodeValidation, "presence meta exceeds maximum size", nil)
+		}
+	}
+	if a := payload.Agent; a != nil {
+		if len(a.Name) > 128 || len(a.Status) > 128 || len(a.Action) > 256 ||
+			(a.ElementID != nil && len(*a.ElementID) > 128) {
+			return domainErrors.New(domainErrors.CodeValidation, "presence agent fields exceed maximum length", nil)
+		}
+	}
 	return nil
 }
 

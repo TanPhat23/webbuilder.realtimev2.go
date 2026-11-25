@@ -144,77 +144,119 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 	user, _ := c.Locals("user").(*domainEntity.User)
 	if user == nil || user.ID == "" {
 		h.logger.Errorf("WebSocket connection rejected: missing authenticated user (projectID=%s)", projectID)
-		client := wsentity.NewClient(c, projectID, nil)
-		_ = client.WriteJSON(client.Factory().Error(domainErrors.CodeUnauthorized, "unauthorized"))
-		client.Release()
+		rejectWS(c, projectID, nil, domainErrors.CodeUnauthorized, "unauthorized")
 		return
 	}
-
-	if projectID == "" {
-		client := wsentity.NewClient(c, projectID, user)
-		_ = client.WriteJSON(client.Factory().Error(domainErrors.CodeValidation, "project ID is required"))
-		client.Release()
-		return
-	}
-	if !validation.IsValidSafeID(projectID) {
-		client := wsentity.NewClient(c, projectID, user)
-		_ = client.WriteJSON(client.Factory().Error(domainErrors.CodeValidation, "invalid project ID"))
-		client.Release()
-		return
-	}
-	if ticketProj, _ := c.Locals("ticketProjectId").(string); ticketProj != "" && ticketProj != projectID {
-		client := wsentity.NewClient(c, projectID, user)
-		_ = client.WriteJSON(client.Factory().Error(domainErrors.CodeAccessDenied, "ticket is not valid for this project"))
-		client.Release()
+	if code, message := validateWSRequest(c, projectID); code != "" {
+		rejectWS(c, projectID, user, code, message)
 		return
 	}
 
 	h.logger.Infof("New WebSocket connection: projectID=%s, userID=%s", projectID, user.ID)
 	client := wsentity.NewClient(c, projectID, user)
 
-	if h.access != nil {
-		read, write, err := h.access.Access(context.Background(), projectID, user.ID)
-		if err != nil {
-			h.logger.Errorf("access check failed for user=%s project=%s: %v", user.ID, projectID, err)
-			_ = client.WriteJSON(client.Factory().Error(domainErrors.CodeInternal, "could not check access"))
-			client.Release()
-			return
-		}
-		if !read {
-			// Same reply whether the project is missing or private.
-			_ = client.WriteJSON(client.Factory().Error(domainErrors.CodeAccessDenied, "you do not have access to this project"))
-			client.Release()
-			return
-		}
-		client.ReadOnly = !write
+	if code, message := h.authorizeWSAccess(client, projectID, user.ID); code != "" {
+		_ = client.WriteJSON(client.Factory().Error(code, message))
+		client.Release()
+		return
 	}
 
+	configureWSConn(c)
+	ck := connKey(projectID, user.ID)
+	h.replaceActiveConn(ck, client)
+	stopPing := h.startPinger(client)
+
+	defer func() {
+		stopPing()
+		_ = h.hub.Unregister(h.ctx, client)
+		h.removeActiveConn(ck, client)
+		// Must be last: fences off the writer goroutine before the library recycles the conn.
+		client.Release()
+	}()
+
+	h.readWSLoop(context.Background(), c, client)
+}
+
+// rejectWS sends a single error frame to a connection that failed admission and releases it.
+func rejectWS(c *websocket.Conn, projectID string, user *domainEntity.User, code, message string) {
+	client := wsentity.NewClient(c, projectID, user)
+	_ = client.WriteJSON(client.Factory().Error(code, message))
+	client.Release()
+}
+
+// validateWSRequest returns a non-empty error code when the project ID or ticket scope is unusable.
+func validateWSRequest(c *websocket.Conn, projectID string) (code, message string) {
+	if projectID == "" {
+		return domainErrors.CodeValidation, "project ID is required"
+	}
+	if !validation.IsValidSafeID(projectID) {
+		return domainErrors.CodeValidation, "invalid project ID"
+	}
+	if ticketProj, _ := c.Locals("ticketProjectId").(string); ticketProj != "" && ticketProj != projectID {
+		return domainErrors.CodeAccessDenied, "ticket is not valid for this project"
+	}
+	return "", ""
+}
+
+// authorizeWSAccess checks project access and marks the client read-only when it cannot write.
+// A non-empty code means the connection must be refused.
+func (h *Handler) authorizeWSAccess(client *wsentity.Client, projectID, userID string) (code, message string) {
+	if h.access == nil {
+		return "", ""
+	}
+	read, write, err := h.access.Access(context.Background(), projectID, userID)
+	if err != nil {
+		h.logger.Errorf("access check failed for user=%s project=%s: %v", userID, projectID, err)
+		return domainErrors.CodeInternal, "could not check access"
+	}
+	if !read {
+		// Same reply whether the project is missing or private.
+		return domainErrors.CodeAccessDenied, "you do not have access to this project"
+	}
+	client.ReadOnly = !write
+	return "", ""
+}
+
+func configureWSConn(c *websocket.Conn) {
 	c.SetReadLimit(maxWSMessageBytes)
 	_ = c.SetReadDeadline(time.Now().Add(wsPongWait))
 	c.SetPongHandler(func(string) error {
 		return c.SetReadDeadline(time.Now().Add(wsPongWait))
 	})
+}
 
-	ck := connKey(projectID, user.ID)
+// replaceActiveConn registers client under key, closing any stale connection for the same user and project.
+func (h *Handler) replaceActiveConn(key string, client *wsentity.Client) {
 	h.activeConnsMu.Lock()
-	if old, exists := h.activeConns[ck]; exists {
-		h.logger.Infof("Closing stale connection for user=%s project=%s", user.ID, projectID)
+	defer h.activeConnsMu.Unlock()
+	if old, exists := h.activeConns[key]; exists {
+		h.logger.Infof("Closing stale connection for project=%s user=%s", client.ProjectID, client.User.ID)
 		_ = h.hub.Unregister(h.ctx, old)
 		old.Close()
 	}
-	h.activeConns[ck] = client
-	h.activeConnsMu.Unlock()
+	h.activeConns[key] = client
+}
 
-	pingStop := make(chan struct{})
-	var pingWG sync.WaitGroup
-	pingWG.Add(1)
+func (h *Handler) removeActiveConn(key string, client *wsentity.Client) {
+	h.activeConnsMu.Lock()
+	defer h.activeConnsMu.Unlock()
+	if h.activeConns[key] == client {
+		delete(h.activeConns, key)
+	}
+}
+
+// startPinger sends periodic pings until the returned stop function is called, and waits for the goroutine to exit.
+func (h *Handler) startPinger(client *wsentity.Client) (stop func()) {
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		defer pingWG.Done()
+		defer wg.Done()
 		ticker := time.NewTicker(wsPingPeriod)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-pingStop:
+			case <-done:
 				return
 			case <-h.ctx.Done():
 				return
@@ -225,26 +267,10 @@ func (h *Handler) HandleWebSocket(c *websocket.Conn) {
 			}
 		}
 	}()
-
-	ctx := context.Background()
-
-	defer func() {
-		close(pingStop)
-		pingWG.Wait()
-
-		_ = h.hub.Unregister(h.ctx, client)
-
-		h.activeConnsMu.Lock()
-		if h.activeConns[ck] == client {
-			delete(h.activeConns, ck)
-		}
-		h.activeConnsMu.Unlock()
-
-		// Must be last: fences off the writer goroutine before the library recycles the conn.
-		client.Release()
-	}()
-
-	h.readWSLoop(ctx, c, client)
+	return func() {
+		close(done)
+		wg.Wait()
+	}
 }
 
 func (h *Handler) readWSLoop(ctx context.Context, c *websocket.Conn, client *wsentity.Client) {
