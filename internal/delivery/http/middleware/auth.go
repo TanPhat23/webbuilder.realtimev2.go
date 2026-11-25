@@ -22,6 +22,14 @@ import (
 
 const wsTicketRedisPrefix = "ws:ticket:"
 
+const (
+	msgUnsafeDevMode  = "Server misconfigured: DEV_MODE is forbidden in this environment"
+	msgMissingTicket  = "Unauthorized: Missing or invalid WebSocket ticket"
+	msgNoTicketStore  = "Server misconfigured: missing ticket store"
+	msgInvalidTicket  = "Unauthorized: Invalid or expired ticket"
+	msgInvalidPayload = "Unauthorized: Invalid ticket payload"
+)
+
 // AuthMiddleware authenticates /ws upgrade requests exclusively via single-use Redis ?ticket=
 // credentials (or DEV_MODE in non-production environments).
 func AuthMiddleware(cfg *config.Config, rdb ...*redis.Client) fiber.Handler {
@@ -33,157 +41,160 @@ func AuthMiddleware(cfg *config.Config, rdb ...*redis.Client) fiber.Handler {
 	// Fail closed if DEV_MODE is enabled in production/staging or with a live Clerk key.
 	if cfg != nil && cfg.IsUnsafeDevMode() {
 		logger.Default().Errorf("AuthMiddleware: DEV_MODE is forbidden in production/staging or with live Clerk key")
-		return func(c *fiber.Ctx) error {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Server misconfigured: DEV_MODE is forbidden in this environment",
-			})
-		}
+		return func(c *fiber.Ctx) error { return abort(c, fiber.StatusInternalServerError, msgUnsafeDevMode) }
 	}
 
-	var userClient *user.Client
-	if cfg != nil && cfg.ClerkSecretKey != "" {
-		clerkCfg := &clerk.ClientConfig{}
-		clerkCfg.Key = clerk.String(cfg.ClerkSecretKey)
-		userClient = user.NewClient(clerkCfg)
-	}
+	userClient := newClerkUserClient(cfg)
 
 	return func(c *fiber.Ctx) error {
 		if cfg != nil && cfg.IsUnsafeDevMode() {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Server misconfigured: DEV_MODE is forbidden in this environment",
-			})
+			return abort(c, fiber.StatusInternalServerError, msgUnsafeDevMode)
 		}
-
 		if cfg != nil && cfg.DevMode {
-			devUserId := os.Getenv("DEV_USER_ID")
-			if devUserId == "" {
-				devUserId = "dev-user-id"
-			}
-			// Dev mode only: let a test client pick its identity, so several
-			// users can connect at once.
-			if override := c.Query("devUser", c.Get("X-Dev-User")); override != "" {
-				devUserId = override
-			}
-
-			logger.Default().Debugf("AuthMiddleware: DevMode active, using UserID: %s", devUserId)
-
-			devUser := &entity.User{
-				ID:    devUserId,
-				Email: "dev@example.com",
-			}
-			c.Locals("userId", devUser.ID)
-			c.Locals("user", devUser)
-			return c.Next()
+			return authenticateDevUser(c)
 		}
-
-		ticket := strings.TrimSpace(c.Query("ticket"))
-		if ticket == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Unauthorized: Missing or invalid WebSocket ticket",
-			})
-		}
-		if redisClient == nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Server misconfigured: missing ticket store",
-			})
-		}
-		if !validation.IsValidSafeID(ticket) {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Unauthorized: Invalid or expired ticket",
-			})
-		}
-
-		sum := sha256.Sum256([]byte(ticket))
-		ticketVal, err := redisClient.GetDel(c.UserContext(), wsTicketRedisPrefix+hex.EncodeToString(sum[:])).Result()
-		if err != nil || strings.TrimSpace(ticketVal) == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Unauthorized: Invalid or expired ticket",
-			})
-		}
-		ticketVal = strings.TrimSpace(ticketVal)
-
-		if strings.HasPrefix(ticketVal, "{") {
-			var ticketUser struct {
-				ID        string  `json:"id"`
-				UserID    string  `json:"userId"`
-				ProjectID string  `json:"projectId"`
-				Email     string  `json:"email"`
-				FirstName *string `json:"firstName"`
-				LastName  *string `json:"lastName"`
-				ImageUrl  *string `json:"imageUrl"`
-			}
-			if err := json.Unmarshal([]byte(ticketVal), &ticketUser); err != nil {
-				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-					"error": "Unauthorized: Invalid ticket payload",
-				})
-			}
-			uid := ticketUser.UserID
-			if uid == "" {
-				uid = ticketUser.ID
-			}
-			if uid == "" {
-				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-					"error": "Unauthorized: Invalid ticket payload",
-				})
-			}
-			mappedUser := &entity.User{
-				ID:        uid,
-				Email:     ticketUser.Email,
-				FirstName: ticketUser.FirstName,
-				LastName:  ticketUser.LastName,
-				ImageUrl:  ticketUser.ImageUrl,
-			}
-			if userClient != nil && mappedUser.Email == "" {
-				enrichClerkUser(c.UserContext(), userClient, mappedUser)
-			}
-			c.Locals("userId", mappedUser.ID)
-			c.Locals("user", mappedUser)
-			if ticketUser.ProjectID != "" {
-				c.Locals("ticketProjectId", ticketUser.ProjectID)
-			}
-			return c.Next()
-		}
-
-		mappedUser := &entity.User{ID: ticketVal}
-		if userClient != nil {
-			enrichClerkUser(c.UserContext(), userClient, mappedUser)
-		}
-		c.Locals("userId", mappedUser.ID)
-		c.Locals("user", mappedUser)
-		return c.Next()
+		return authenticateWSTicket(c, redisClient, userClient)
 	}
 }
 
-func enrichClerkUser(ctx context.Context, userClient *user.Client, mappedUser *entity.User) {
-	usr, err := userClient.Get(ctx, mappedUser.ID)
+func abort(c *fiber.Ctx, status int, message string) error {
+	return c.Status(status).JSON(fiber.Map{"error": message})
+}
+
+func newClerkUserClient(cfg *config.Config) *user.Client {
+	if cfg == nil || cfg.ClerkSecretKey == "" {
+		return nil
+	}
+	clerkCfg := &clerk.ClientConfig{}
+	clerkCfg.Key = clerk.String(cfg.ClerkSecretKey)
+	return user.NewClient(clerkCfg)
+}
+
+// proceed stores the authenticated user for downstream handlers.
+func proceed(c *fiber.Ctx, u *entity.User) error {
+	c.Locals("userId", u.ID)
+	c.Locals("user", u)
+	return c.Next()
+}
+
+func authenticateDevUser(c *fiber.Ctx) error {
+	devUserID := os.Getenv("DEV_USER_ID")
+	if devUserID == "" {
+		devUserID = "dev-user-id"
+	}
+	// Dev mode only: let a test client pick its identity, so several
+	// users can connect at once.
+	if override := c.Query("devUser", c.Get("X-Dev-User")); override != "" {
+		devUserID = override
+	}
+	logger.Default().Debugf("AuthMiddleware: DevMode active, using UserID: %s", devUserID)
+	return proceed(c, &entity.User{ID: devUserID, Email: "dev@example.com"})
+}
+
+func authenticateWSTicket(c *fiber.Ctx, rdb *redis.Client, userClient *user.Client) error {
+	ticket := strings.TrimSpace(c.Query("ticket"))
+	if ticket == "" {
+		return abort(c, fiber.StatusUnauthorized, msgMissingTicket)
+	}
+	if rdb == nil {
+		return abort(c, fiber.StatusInternalServerError, msgNoTicketStore)
+	}
+	if !validation.IsValidSafeID(ticket) {
+		return abort(c, fiber.StatusUnauthorized, msgInvalidTicket)
+	}
+
+	sum := sha256.Sum256([]byte(ticket))
+	value, err := rdb.GetDel(c.UserContext(), wsTicketRedisPrefix+hex.EncodeToString(sum[:])).Result()
+	value = strings.TrimSpace(value)
+	if err != nil || value == "" {
+		return abort(c, fiber.StatusUnauthorized, msgInvalidTicket)
+	}
+
+	if strings.HasPrefix(value, "{") {
+		return authenticateTicketPayload(c, userClient, value)
+	}
+	mapped := &entity.User{ID: value}
+	if userClient != nil {
+		enrichClerkUser(c.UserContext(), userClient, mapped)
+	}
+	return proceed(c, mapped)
+}
+
+type wsTicketPayload struct {
+	ID        string  `json:"id"`
+	UserID    string  `json:"userId"`
+	ProjectID string  `json:"projectId"`
+	Email     string  `json:"email"`
+	FirstName *string `json:"firstName"`
+	LastName  *string `json:"lastName"`
+	ImageUrl  *string `json:"imageUrl"`
+}
+
+func authenticateTicketPayload(c *fiber.Ctx, userClient *user.Client, value string) error {
+	var payload wsTicketPayload
+	if err := json.Unmarshal([]byte(value), &payload); err != nil {
+		return abort(c, fiber.StatusUnauthorized, msgInvalidPayload)
+	}
+	uid := payload.UserID
+	if uid == "" {
+		uid = payload.ID
+	}
+	if uid == "" {
+		return abort(c, fiber.StatusUnauthorized, msgInvalidPayload)
+	}
+	mapped := &entity.User{
+		ID:        uid,
+		Email:     payload.Email,
+		FirstName: payload.FirstName,
+		LastName:  payload.LastName,
+		ImageUrl:  payload.ImageUrl,
+	}
+	if userClient != nil && mapped.Email == "" {
+		enrichClerkUser(c.UserContext(), userClient, mapped)
+	}
+	if payload.ProjectID != "" {
+		c.Locals("ticketProjectId", payload.ProjectID)
+	}
+	return proceed(c, mapped)
+}
+
+type clerkUserPayload struct {
+	EmailAddresses []struct {
+		EmailAddress string `json:"emailAddress"`
+	} `json:"emailAddresses"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	ImageURL  string `json:"imageUrl"`
+}
+
+func enrichClerkUser(ctx context.Context, userClient *user.Client, mapped *entity.User) {
+	usr, err := userClient.Get(ctx, mapped.ID)
 	if err != nil {
 		logger.Default().Debugf("AuthMiddleware: failed to fetch user from Clerk: %v", err)
 		return
 	}
-	var raw map[string]any
-	if b, err := json.Marshal(usr); err == nil {
-		if err := json.Unmarshal(b, &raw); err == nil {
-			if v, ok := raw["emailAddresses"]; ok {
-				if arr, ok := v.([]interface{}); ok && len(arr) > 0 {
-					if e0, ok := arr[0].(map[string]interface{}); ok {
-						if ea, ok := e0["emailAddress"].(string); ok && ea != "" {
-							mappedUser.Email = ea
-						}
-					}
-				}
-			}
-			if v, ok := raw["firstName"].(string); ok && v != "" {
-				mappedUser.FirstName = new(string)
-				*mappedUser.FirstName = v
-			}
-			if v, ok := raw["lastName"].(string); ok && v != "" {
-				mappedUser.LastName = new(string)
-				*mappedUser.LastName = v
-			}
-			if v, ok := raw["imageUrl"].(string); ok && v != "" {
-				mappedUser.ImageUrl = new(string)
-				*mappedUser.ImageUrl = v
-			}
-		}
+	raw, err := json.Marshal(usr)
+	if err != nil {
+		return
+	}
+	var payload clerkUserPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return
+	}
+	applyClerkUserFields(mapped, payload)
+}
+
+func applyClerkUserFields(mapped *entity.User, p clerkUserPayload) {
+	if len(p.EmailAddresses) > 0 && p.EmailAddresses[0].EmailAddress != "" {
+		mapped.Email = p.EmailAddresses[0].EmailAddress
+	}
+	setIfPresent(&mapped.FirstName, p.FirstName)
+	setIfPresent(&mapped.LastName, p.LastName)
+	setIfPresent(&mapped.ImageUrl, p.ImageURL)
+}
+
+func setIfPresent(dst **string, v string) {
+	if v != "" {
+		*dst = &v
 	}
 }
